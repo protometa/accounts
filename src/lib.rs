@@ -3,7 +3,7 @@ mod money;
 
 use anyhow::{Context, Error, Result};
 use async_std::fs;
-use async_walkdir::{DirEntry, WalkDir};
+use async_walkdir::WalkDir;
 use entry::raw_entry::RawEntry;
 use entry::Entry;
 use futures::stream::{self, StreamExt, TryStreamExt};

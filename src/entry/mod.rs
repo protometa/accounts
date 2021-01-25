@@ -8,34 +8,49 @@ use std::convert::{TryFrom, TryInto};
 
 /// This is a fully valid entry.
 #[derive(Debug)]
-pub enum Entry {
+pub struct Entry {
+    id: String,
+    date: NaiveDate,
+    body: EntryBody,
+}
+
+#[derive(Debug)]
+enum EntryBody {
     PaymentSent(Payment),
     PaymentReceived(Payment),
     PurchaseInvoice(Invoice),
     SaleInvoice(Invoice),
 }
 
+impl Entry {
+    pub fn id(&self) -> String {
+        self.id.clone()
+    }
+}
+
 impl TryFrom<RawEntry> for Entry {
     type Error = Error;
 
     fn try_from(raw_entry: RawEntry) -> Result<Self> {
-        match raw_entry.r#type.as_ref() {
-            "Payment Sent" => Ok(Entry::PaymentSent(raw_entry.try_into()?)),
-            "Payment Received" => Ok(Entry::PaymentReceived(raw_entry.try_into()?)),
-            "Purchase Invoice" => Ok(Entry::PurchaseInvoice(raw_entry.try_into()?)),
-            "Sales Invoice" => Ok(Entry::SaleInvoice(raw_entry.try_into()?)),
-            _ => Err(Error::msg(format!(
-                "{} not a valid entry type",
-                raw_entry.r#type
-            ))),
-        }
+        Ok(Entry {
+            id: raw_entry.id.clone().context("Id missing!")?,
+            date: raw_entry.date.parse()?,
+            body: match raw_entry.r#type.as_ref() {
+                "Payment Sent" => Ok(EntryBody::PaymentSent(raw_entry.try_into()?)),
+                "Payment Received" => Ok(EntryBody::PaymentReceived(raw_entry.try_into()?)),
+                "Purchase Invoice" => Ok(EntryBody::PurchaseInvoice(raw_entry.try_into()?)),
+                "Sales Invoice" => Ok(EntryBody::SaleInvoice(raw_entry.try_into()?)),
+                _ => Err(Error::msg(format!(
+                    "{} not a valid entry type",
+                    raw_entry.r#type
+                ))),
+            }?,
+        })
     }
 }
 
 #[derive(Debug)]
 pub struct Payment {
-    id: String,
-    date: NaiveDate,
     party: String,
     account: String,
     memo: Option<String>,
@@ -48,22 +63,19 @@ impl TryFrom<RawEntry> for Payment {
     fn try_from(raw_entry: RawEntry) -> Result<Self> {
         let RawEntry {
             id,
-            date,
             party,
             account,
             memo,
             amount,
             ..
         } = raw_entry;
-        let id = id.context("Id missing!")?;
+
         Ok(Self {
-            id: id.clone(),
-            date: date.parse()?,
             party,
             account,
             memo,
             amount: amount
-                .context(format!("Amount required for payment entry in {}", id))?
+                .context(format!("Amount required for payment entry in {:?}", id))?
                 .try_into()?,
         })
     }
@@ -71,8 +83,6 @@ impl TryFrom<RawEntry> for Payment {
 
 #[derive(Debug)]
 pub struct Invoice {
-    id: String,
-    date: NaiveDate,
     party: String,
     account: String, // default account for item expenses (items may include their own account to override)
     items: Vec<InvoiceItem>,
@@ -160,7 +170,6 @@ impl TryFrom<RawEntry> for Invoice {
     fn try_from(raw_entry: RawEntry) -> Result<Self> {
         let RawEntry {
             id,
-            date,
             party,
             account,
             items,
@@ -170,12 +179,10 @@ impl TryFrom<RawEntry> for Invoice {
         } = raw_entry;
         let id = id.context("Id missing!")?;
         Ok(Self {
-            id: id.clone(),
-            date: date.parse()?,
             party,
             account: account.clone(),
             items: Self::items_try_from_raw_items(
-                items.context(format!("Items not listed on Invoice {}", id))?,
+                items.context(format!("Items not listed on Invoice {:?}", id))?,
                 account,
                 id.clone(),
             )?,

@@ -2,6 +2,7 @@ use accounts::entries_from_files;
 use accounts::entry::Entry;
 use anyhow::Result;
 use futures::stream::TryStreamExt;
+use itertools::Itertools;
 
 #[async_std::test]
 async fn test() -> Result<()> {
@@ -32,6 +33,7 @@ async fn test_multiple_entries_in_one_file() -> Result<()> {
         .try_collect::<Vec<Entry>>()
         .await?;
     dbg!(&entries);
-    assert_eq!(entries.len(), 2);
+    let count = entries.iter().map(|entry| entry.id()).unique().count();
+    assert_eq!(count, 2);
     Ok(())
 }
