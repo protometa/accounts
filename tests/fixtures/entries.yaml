@@ -1,0 +1,15 @@
+---
+type: Purchase Invoice
+date: 3000-01-01
+party: ACME Business Services
+account: Operating Expenses
+items:
+  - description: Business Services
+    amount: 100
+---
+type: Payment Sent
+date: 3000-01-02
+party: ACME Business Services 
+memo: Business Services
+account: Credit Card
+amount: 100

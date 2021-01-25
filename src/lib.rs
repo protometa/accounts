@@ -8,15 +8,24 @@ use entry::raw_entry::RawEntry;
 use entry::Entry;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use std::convert::TryInto;
+use std::path::PathBuf;
 
 pub async fn entries_from_files(dir: &str) -> Result<impl TryStreamExt<Ok = Entry, Error = Error>> {
-    let dir = dir.to_owned();
-    Ok(WalkDir::new(&dir)
-        .map_err(Error::new) // map to anyhow::Error from here on
-        .try_filter_map(move |file: DirEntry| {
-            let dir = dir.clone();
+    let dir1 = dir.to_owned();
+    let dir2 = dir.to_owned();
+    Ok(WalkDir::new(dir)
+        .map_ok(|dir_entry| dir_entry.path())
+        .map(move |result| match result {
+            Err(error) => match error.raw_os_error() {
+                Some(20) => Ok(PathBuf::from(&dir1)),
+                _ => Err(error),
+            },
+            _ => result,
+        })
+        .map_err(Error::new) // map to anyhow::Error from here o
+        .try_filter_map(move |path: PathBuf| {
+            let dir2 = dir2.clone();
             async move {
-                let path = file.path();
                 let filename = path
                     .file_name()
                     .context("can't get filename")?
@@ -33,8 +42,8 @@ pub async fn entries_from_files(dir: &str) -> Result<impl TryStreamExt<Ok = Entr
                     .map(ToOwned::to_owned)
                     .collect();
                 let sub_stream = stream::iter(docs).map(move |yaml: String| -> Result<_> {
-                    let subpath = path.strip_prefix(&dir)?.to_owned();
-                    Ok((subpath, yaml))
+                    let subpath = path.strip_prefix(&dir2)?.to_owned();
+                    Ok((dbg!(subpath), yaml))
                 });
 
                 Ok(Some(sub_stream))

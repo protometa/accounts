@@ -24,3 +24,14 @@ async fn test_nested_dirs() -> Result<()> {
     assert_eq!(entries.len(), 1);
     Ok(())
 }
+
+#[async_std::test]
+async fn test_multiple_entries_in_one_file() -> Result<()> {
+    let entries = entries_from_files("./tests/fixtures/entries.yaml")
+        .await?
+        .try_collect::<Vec<Entry>>()
+        .await?;
+    dbg!(&entries);
+    assert_eq!(entries.len(), 2);
+    Ok(())
+}
