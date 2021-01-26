@@ -28,7 +28,7 @@ async fn test_nested_dirs() -> Result<()> {
 
 #[async_std::test]
 async fn test_multiple_entries_in_one_file() -> Result<()> {
-    let entries = entries_from_files("./tests/fixtures/entries.yaml")
+    let entries = entries_from_files("./tests/fixtures/entries_multiple_entries_in_one_file")
         .await?
         .try_collect::<Vec<Entry>>()
         .await?;

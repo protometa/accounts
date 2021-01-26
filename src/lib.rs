@@ -3,34 +3,25 @@ mod money;
 
 use anyhow::{Context, Error, Result};
 use async_std::fs;
-use async_walkdir::WalkDir;
+use async_walkdir::{DirEntry, WalkDir};
 use entry::raw_entry::RawEntry;
 use entry::Entry;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use std::convert::TryInto;
-use std::path::PathBuf;
 
 pub async fn entries_from_files(dir: &str) -> Result<impl TryStreamExt<Ok = Entry, Error = Error>> {
-    let dir1 = dir.to_owned();
-    let dir2 = dir.to_owned();
-    Ok(WalkDir::new(dir)
-        .map_ok(|dir_entry| dir_entry.path())
-        .map(move |result| match result {
-            Err(error) => match error.raw_os_error() {
-                Some(20) => Ok(PathBuf::from(&dir1)),
-                _ => Err(error),
-            },
-            _ => result,
-        })
+    let dir = dir.to_owned();
+    Ok(WalkDir::new(&dir)
         .map_err(Error::new) // map to anyhow::Error from here o
-        .try_filter_map(move |path: PathBuf| {
-            let dir2 = dir2.clone();
+        .try_filter_map(move |dir_entry: DirEntry| {
+            let dir = dir.clone();
             async move {
-                let filename = path
-                    .file_name()
-                    .context("can't get filename")?
+                let path = dir_entry.path();
+                let filestem = path
+                    .file_stem()
+                    .context("can't get filestem")?
                     .to_string_lossy();
-                if path.is_dir() || filename.starts_with(".") {
+                if path.is_dir() || filestem.starts_with(".") {
                     return Ok(None);
                 };
 
@@ -41,21 +32,27 @@ pub async fn entries_from_files(dir: &str) -> Result<impl TryStreamExt<Ok = Entr
                     // only way I can tell to avoid returning reference to content
                     .map(ToOwned::to_owned)
                     .collect();
-                let sub_stream = stream::iter(docs).map(move |yaml: String| -> Result<_> {
-                    let subpath = path.strip_prefix(&dir2)?.to_owned();
-                    Ok((dbg!(subpath), yaml))
-                });
+                let filestem = filestem.into_owned();
+                let sub_stream =
+                    stream::iter(docs)
+                        .enumerate()
+                        .map(move |(index, yaml)| -> Result<_> {
+                            let mut subpath = path.strip_prefix(&dir)?.to_owned();
+                            subpath.pop();
+                            subpath.push(filestem.clone());
+                            Ok((subpath, index, yaml))
+                        });
 
                 Ok(Some(sub_stream))
             }
         })
         .try_flatten()
-        .and_then(|(path, yaml)| async move {
+        .and_then(|(path, index, yaml)| async move {
             let mut raw_entry: RawEntry = serde_yaml::from_str(&yaml)
-                .context(format!("Failed to deserialize entry in {}", path.display()))?;
+                .context(format!("Failed to deserialize entry in {:?}", path))?;
             raw_entry
                 .id
-                .get_or_insert(path.to_string_lossy().into_owned());
+                .get_or_insert(format!("{}-{}", path.to_string_lossy(), index));
             let entry: Entry = raw_entry.try_into()?;
             Ok(entry)
         }))
