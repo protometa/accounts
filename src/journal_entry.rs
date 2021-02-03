@@ -2,67 +2,78 @@ use super::entry::{Entry, EntryBody};
 use super::money::Money;
 use anyhow::Result;
 use chrono::naive::NaiveDate;
+use std::convert::TryFrom;
 
 #[derive(Debug)]
-pub struct JournalEntry {
-    date: NaiveDate,
-    account: String,
-    amount: JournalAmount,
-}
+pub struct JournalEntry(NaiveDate, String, JournalAmount);
 
 impl JournalEntry {
-    pub fn from_entry(entry: Entry) -> Vec<Result<Self>> {
+    pub fn from_entry(entry: Entry) -> Result<Vec<Self>> {
         let date = entry.date();
         match entry.body() {
-            EntryBody::PurchaseInvoice(invoice) => invoice
-                .items()
-                .iter()
-                .map(|item| {
-                    Ok(JournalEntry {
-                        date,
-                        account: item.account(),
-                        amount: JournalAmount::Debit(item.amount()?),
+            EntryBody::PurchaseInvoice(invoice) => {
+                let mut entries = invoice
+                    .items
+                    .iter()
+                    .map(|item| {
+                        Ok(JournalEntry(
+                            date,
+                            item.account.clone(),
+                            JournalAmount::Debit(item.total()?),
+                        ))
                     })
-                })
-                .collect(), // TODO include Credit entry and entries from included payment
+                    .collect::<Result<Vec<Self>>>()?; // TODO include inventory entries if tracking
+                let credit_amount = JournalAmount::Credit(
+                    invoice
+                        .items
+                        .iter()
+                        .fold(Money::try_from(0.0), |acc, item| Ok(acc? + item.total()?))?,
+                );
+                let credit_entry = match invoice.payment {
+                    None => JournalEntry(date, String::from("Accounts Payable"), credit_amount),
+                    Some(payment) => JournalEntry(date, payment.account.clone(), credit_amount),
+                };
+                entries.push(credit_entry);
+                Ok(entries)
+            }
 
-            EntryBody::PaymentSent(payment) => vec![
-                Ok(JournalEntry {
+            EntryBody::PaymentSent(payment) => Ok(vec![
+                JournalEntry(
                     date,
-                    account: payment.account(),
-                    amount: JournalAmount::Credit(payment.amount()),
-                }),
-                Ok(JournalEntry {
+                    payment.account.clone(),
+                    JournalAmount::Credit(payment.amount.clone()),
+                ),
+                JournalEntry(
                     date,
-                    account: "Accounts Payable".to_string(), // TODO include party
-                    amount: JournalAmount::Debit(payment.amount()),
-                }),
-            ],
+                    "Accounts Payable".to_string(), // TODO include party
+                    JournalAmount::Debit(payment.amount.clone()),
+                ),
+            ]),
 
             EntryBody::SaleInvoice(invoice) => invoice
-                .items()
+                .items
                 .iter()
                 .map(|item| {
-                    Ok(JournalEntry {
+                    Ok(JournalEntry(
                         date,
-                        account: item.account(),
-                        amount: JournalAmount::Credit(item.amount()?),
-                    })
+                        item.account.clone(),
+                        JournalAmount::Credit(item.total()?),
+                    ))
                 })
-                .collect(), // TODO include Dedit entry and entries from included payment
+                .collect(), // TODO include Dedit entry, entries from included payment, and inventory if tracking
 
-            EntryBody::PaymentReceived(payment) => vec![
-                Ok(JournalEntry {
+            EntryBody::PaymentReceived(payment) => Ok(vec![
+                JournalEntry(
                     date,
-                    account: payment.account(),
-                    amount: JournalAmount::Debit(payment.amount()),
-                }),
-                Ok(JournalEntry {
+                    payment.account,
+                    JournalAmount::Debit(payment.amount.clone()),
+                ),
+                JournalEntry(
                     date,
-                    account: "Accounts Recievable".to_string(), // TODO include party
-                    amount: JournalAmount::Credit(payment.amount()),
-                }),
-            ],
+                    "Accounts Recievable".to_string(), // TODO include party
+                    JournalAmount::Credit(payment.amount.clone()),
+                ),
+            ]),
         }
     }
 }

@@ -10,7 +10,7 @@ use std::convert::{TryFrom, TryInto};
 /// This is a fully valid entry.
 #[derive(Debug)]
 pub struct Entry {
-    pub id: String,
+    id: String,
     date: NaiveDate,
     body: EntryBody,
 }
@@ -58,19 +58,10 @@ impl TryFrom<RawEntry> for Entry {
 
 #[derive(Debug, Clone)]
 pub struct Payment {
-    party: String,
-    account: String,
-    memo: Option<String>,
-    amount: Money,
-}
-
-impl Payment {
-    pub fn account(&self) -> String {
-        self.account.clone()
-    }
-    pub fn amount(&self) -> Money {
-        self.amount.clone()
-    }
+    pub party: String,
+    pub account: String,
+    pub memo: Option<String>,
+    pub amount: Money,
 }
 
 impl TryFrom<RawEntry> for Payment {
@@ -99,17 +90,13 @@ impl TryFrom<RawEntry> for Payment {
 
 #[derive(Debug, Clone)]
 pub struct Invoice {
-    party: String,
-    items: Vec<InvoiceItem>,
-    extras: Option<Vec<InvoiceExtra>>,
-    payment: Option<InvoicePayment>,
+    pub party: String,
+    pub items: Vec<InvoiceItem>,
+    pub extras: Option<Vec<InvoiceExtra>>,
+    pub payment: Option<InvoicePayment>,
 }
 
 impl Invoice {
-    pub fn items(&self) -> Vec<InvoiceItem> {
-        self.items.clone()
-    }
-
     fn items_try_from_raw_items(
         raw_items: Vec<raw_entry::Item>,
         entry_account: String,
@@ -219,17 +206,14 @@ impl TryFrom<RawEntry> for Invoice {
 
 #[derive(Debug, Clone)]
 pub struct InvoiceItem {
-    description: Option<String>,
-    code: Option<String>, // include if tracking item
-    account: String,
-    amount: InvoiceItemAmount,
+    pub description: Option<String>,
+    pub code: Option<String>, // include if tracking item
+    pub account: String,
+    pub amount: InvoiceItemAmount,
 }
 
 impl InvoiceItem {
-    pub fn account(&self) -> String {
-        self.account.clone()
-    }
-    pub fn amount(&self) -> Result<Money> {
+    pub fn total(&self) -> Result<Money> {
         match self.amount.clone() {
             InvoiceItemAmount::Total(amount) => Ok(amount),
             InvoiceItemAmount::ByRate {
@@ -247,13 +231,13 @@ impl InvoiceItem {
 }
 
 #[derive(Debug, Clone)]
-enum InvoiceItemAmount {
+pub enum InvoiceItemAmount {
     Total(Money),
     ByRate { rate: Money, quantity: f64 },
 }
 
 #[derive(Debug, Clone)]
-struct InvoiceExtra {
+pub struct InvoiceExtra {
     description: Option<String>,
     account: String,
     amount: InvoiceExtraAmount,
@@ -267,7 +251,7 @@ enum InvoiceExtraAmount {
 }
 
 #[derive(Debug, Clone)]
-struct InvoicePayment {
-    account: String,
-    amount: Money,
+pub struct InvoicePayment {
+    pub account: String,
+    pub amount: Money,
 }

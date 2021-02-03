@@ -12,11 +12,7 @@ async fn test_basic_entries() -> Result<()> {
         .try_collect::<Vec<Entry>>()
         .await?;
     dbg!(&entries);
-    let count = entries
-        .iter()
-        .map(|entry| entry.id.clone())
-        .unique()
-        .count();
+    let count = entries.iter().map(|entry| entry.id()).unique().count();
     assert_eq!(count, 2);
     Ok(())
 }
@@ -28,11 +24,7 @@ async fn test_nested_dirs() -> Result<()> {
         .try_collect::<Vec<Entry>>()
         .await?;
     dbg!(&entries);
-    let count = entries
-        .iter()
-        .map(|entry| entry.id.clone())
-        .unique()
-        .count();
+    let count = entries.iter().map(|entry| entry.id()).unique().count();
     assert_eq!(count, 2);
     Ok(())
 }
@@ -44,11 +36,7 @@ async fn test_multiple_entries_in_one_file() -> Result<()> {
         .try_collect::<Vec<Entry>>()
         .await?;
     dbg!(&entries);
-    let count = entries
-        .iter()
-        .map(|entry| entry.id.clone())
-        .unique()
-        .count();
+    let count = entries.iter().map(|entry| entry.id()).unique().count();
     assert_eq!(count, 2);
     Ok(())
 }
@@ -59,6 +47,7 @@ async fn test_journal_from_entries() -> Result<()> {
     let journal: Vec<JournalEntry> = journal(entries).try_collect().await?;
     dbg!(&journal);
     let count = journal.iter().count();
-    assert_eq!(count, 4);
+    assert_eq!(count, 8);
+    // TODO assert contents of journal
     Ok(())
 }

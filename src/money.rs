@@ -2,6 +2,7 @@ use anyhow::{Context, Error, Result};
 use rust_decimal::prelude::*;
 use std::convert::TryFrom;
 use std::fmt;
+use std::ops::Add;
 
 #[derive(Debug, Clone)]
 pub struct Money(pub Decimal);
@@ -22,6 +23,22 @@ impl TryFrom<f64> for Money {
 impl fmt::Display for Money {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "${}", self.0)
+    }
+}
+
+impl<'a, 'b> Add<&'b Money> for &'a Money {
+    type Output = Money;
+
+    fn add(self, other: &Money) -> Money {
+        Money(self.0 + (*other).0)
+    }
+}
+
+impl Add<Money> for Money {
+    type Output = Money;
+
+    fn add(self, other: Money) -> Money {
+        Money(self.0 + other.0)
     }
 }
 
@@ -46,5 +63,19 @@ mod tests {
         assert_eq!(m.to_string(), "$1.111");
 
         Ok(())
+    }
+
+    #[test]
+    fn test_add() -> Result<()> {
+        let add = Money::try_from(100.00)? + Money::try_from(100.00)?;
+        assert_eq!(add.to_string(), "$200.00");
+        Ok(())
+    }
+
+    #[test]
+    #[should_panic(expected = "Addition overflowed")]
+    #[allow(unused_must_use)]
+    fn test_add_panic() -> () {
+        Money::try_from(7.9e28).unwrap() + Money::try_from(7.9e28).unwrap();
     }
 }

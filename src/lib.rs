@@ -64,7 +64,9 @@ pub fn journal(
     entries: impl TryStreamExt<Ok = Entry, Error = Error>,
 ) -> impl TryStreamExt<Ok = JournalEntry, Error = Error> {
     entries
-        .map_ok(|entry| stream::iter(JournalEntry::from_entry(entry)))
+        .and_then(|entry| async {
+            Ok(stream::iter(JournalEntry::from_entry(entry)?).map(|x| Ok(x)))
+        })
         .try_flatten()
 }
 
