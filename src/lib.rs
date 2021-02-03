@@ -1,4 +1,5 @@
 pub mod entry;
+pub mod journal_entry;
 mod money;
 
 use anyhow::{Context, Error, Result};
@@ -7,6 +8,7 @@ use async_walkdir::{DirEntry, WalkDir};
 use entry::raw_entry::RawEntry;
 use entry::Entry;
 use futures::stream::{self, StreamExt, TryStreamExt};
+use journal_entry::JournalEntry;
 use std::convert::TryInto;
 
 pub async fn entries_from_files(dir: &str) -> Result<impl TryStreamExt<Ok = Entry, Error = Error>> {
@@ -56,6 +58,14 @@ pub async fn entries_from_files(dir: &str) -> Result<impl TryStreamExt<Ok = Entr
             let entry: Entry = raw_entry.try_into()?;
             Ok(entry)
         }))
+}
+
+pub fn journal(
+    entries: impl TryStreamExt<Ok = Entry, Error = Error>,
+) -> impl TryStreamExt<Ok = JournalEntry, Error = Error> {
+    entries
+        .map_ok(|entry| stream::iter(JournalEntry::from_entry(entry)))
+        .try_flatten()
 }
 
 pub async fn balance(entries: impl TryStreamExt<Ok = Entry, Error = Error>) -> Result<()> {

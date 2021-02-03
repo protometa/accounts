@@ -4,18 +4,19 @@ use super::money::Money;
 use anyhow::{Context, Error, Result};
 use chrono::naive::NaiveDate;
 use raw_entry::RawEntry;
+use rust_decimal::Decimal;
 use std::convert::{TryFrom, TryInto};
 
 /// This is a fully valid entry.
 #[derive(Debug)]
 pub struct Entry {
-    id: String,
+    pub id: String,
     date: NaiveDate,
     body: EntryBody,
 }
 
-#[derive(Debug)]
-enum EntryBody {
+#[derive(Debug, Clone)]
+pub enum EntryBody {
     PaymentSent(Payment),
     PaymentReceived(Payment),
     PurchaseInvoice(Invoice),
@@ -25,6 +26,12 @@ enum EntryBody {
 impl Entry {
     pub fn id(&self) -> String {
         self.id.clone()
+    }
+    pub fn date(&self) -> NaiveDate {
+        self.date.clone()
+    }
+    pub fn body(&self) -> EntryBody {
+        self.body.clone()
     }
 }
 
@@ -49,12 +56,21 @@ impl TryFrom<RawEntry> for Entry {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Payment {
     party: String,
     account: String,
     memo: Option<String>,
     amount: Money,
+}
+
+impl Payment {
+    pub fn account(&self) -> String {
+        self.account.clone()
+    }
+    pub fn amount(&self) -> Money {
+        self.amount.clone()
+    }
 }
 
 impl TryFrom<RawEntry> for Payment {
@@ -81,16 +97,19 @@ impl TryFrom<RawEntry> for Payment {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Invoice {
     party: String,
-    account: String, // default account for item expenses (items may include their own account to override)
     items: Vec<InvoiceItem>,
     extras: Option<Vec<InvoiceExtra>>,
     payment: Option<InvoicePayment>,
 }
 
 impl Invoice {
+    pub fn items(&self) -> Vec<InvoiceItem> {
+        self.items.clone()
+    }
+
     fn items_try_from_raw_items(
         raw_items: Vec<raw_entry::Item>,
         entry_account: String,
@@ -180,7 +199,6 @@ impl TryFrom<RawEntry> for Invoice {
         let id = id.context("Id missing!")?;
         Ok(Self {
             party,
-            account: account.clone(),
             items: Self::items_try_from_raw_items(
                 items.context(format!("Items not listed on Invoice {:?}", id))?,
                 account,
@@ -199,35 +217,56 @@ impl TryFrom<RawEntry> for Invoice {
     }
 }
 
-#[derive(Debug)]
-struct InvoiceItem {
+#[derive(Debug, Clone)]
+pub struct InvoiceItem {
     description: Option<String>,
     code: Option<String>, // include if tracking item
     account: String,
     amount: InvoiceItemAmount,
 }
 
-#[derive(Debug)]
+impl InvoiceItem {
+    pub fn account(&self) -> String {
+        self.account.clone()
+    }
+    pub fn amount(&self) -> Result<Money> {
+        match self.amount.clone() {
+            InvoiceItemAmount::Total(amount) => Ok(amount),
+            InvoiceItemAmount::ByRate {
+                rate: Money(money),
+                quantity,
+            } => {
+                let quantity: Decimal = quantity.try_into()?;
+                let amount = money
+                    .checked_mul(quantity)
+                    .context("ammount * quantity overflow")?;
+                Ok(Money(amount))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 enum InvoiceItemAmount {
     Total(Money),
     ByRate { rate: Money, quantity: f64 },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct InvoiceExtra {
     description: Option<String>,
     account: String,
     amount: InvoiceExtraAmount,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum InvoiceExtraAmount {
     Total(Money),
     Rate(f64),
     // CumulativeRate(f64),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct InvoicePayment {
     account: String,
     amount: Money,

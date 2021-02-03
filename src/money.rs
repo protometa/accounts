@@ -3,8 +3,8 @@ use rust_decimal::prelude::*;
 use std::convert::TryFrom;
 use std::fmt;
 
-#[derive(Debug)]
-pub struct Money(Decimal);
+#[derive(Debug, Clone)]
+pub struct Money(pub Decimal);
 
 /// Basically this holds a Decimal that is scaled out to at least 2 dp (doesn't round).
 impl TryFrom<f64> for Money {

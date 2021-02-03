@@ -1,0 +1,7 @@
+type: Purchase Invoice
+date: 3000-01-01
+party: ACME Business Services
+account: Operating Expenses
+items:
+  - description: Business Services
+    amount: 100
