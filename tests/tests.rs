@@ -48,6 +48,21 @@ async fn test_journal_from_entries() -> Result<()> {
     dbg!(&journal);
     let count = journal.iter().count();
     assert_eq!(count, 8);
-    // TODO assert contents of journal
+    let display = journal
+        .iter()
+        .map(|journal_entry| journal_entry.to_string())
+        .join("\n");
+    println!("{}", display);
+    assert_eq!(
+        display,
+        "| 3000-01-01 | Operating Expenses        |      $100.00 |              |\n\
+         | 3000-01-01 | Accounts Payable          |              |      $100.00 |\n\
+         | 3000-01-02 | Credit Card               |              |      $100.00 |\n\
+         | 3000-01-02 | Accounts Payable          |      $100.00 |              |\n\
+         | 3000-01-03 | Operating Expenses        |       $50.00 |              |\n\
+         | 3000-01-03 | Business Checking         |              |       $50.00 |\n\
+         | 3000-01-04 | Operating Expenses        |      $100.00 |              |\n\
+         | 3000-01-04 | Accounts Payable          |              |      $100.00 |"
+    );
     Ok(())
 }

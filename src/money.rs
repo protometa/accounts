@@ -22,7 +22,11 @@ impl TryFrom<f64> for Money {
 
 impl fmt::Display for Money {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "${}", self.0)
+        if self.0.is_sign_negative() {
+            write!(f, "(${})", self.0)
+        } else {
+            write!(f, "${}", self.0)
+        }
     }
 }
 
