@@ -1,1 +1,4 @@
-# accounts
+
+# Accounts
+
+File-based accounting tools.
