@@ -1,3 +1,4 @@
+use self::JournalAmount::*;
 use super::entry::{Entry, EntryBody};
 use super::money::Money;
 use anyhow::Result;
@@ -20,11 +21,11 @@ impl JournalEntry {
                         Ok(JournalEntry(
                             date,
                             item.account.clone(),
-                            JournalAmount::Debit(item.total()?),
+                            Debit(item.total()?),
                         ))
                     })
                     .collect::<Result<Vec<Self>>>()?; // TODO include inventory entries if tracking
-                let credit_amount = JournalAmount::Credit(
+                let credit_amount = Credit(
                     invoice
                         .items
                         .iter()
@@ -42,12 +43,12 @@ impl JournalEntry {
                 JournalEntry(
                     date,
                     payment.account.clone(),
-                    JournalAmount::Credit(payment.amount.clone()),
+                    Credit(payment.amount.clone()),
                 ),
                 JournalEntry(
                     date,
                     "Accounts Payable".to_string(), // TODO include party
-                    JournalAmount::Debit(payment.amount.clone()),
+                    Debit(payment.amount.clone()),
                 ),
             ]),
 
@@ -58,21 +59,17 @@ impl JournalEntry {
                     Ok(JournalEntry(
                         date,
                         item.account.clone(),
-                        JournalAmount::Credit(item.total()?),
+                        Credit(item.total()?),
                     ))
                 })
                 .collect(), // TODO include Dedit entry, entries from included payment, and inventory if tracking
 
             EntryBody::PaymentReceived(payment) => Ok(vec![
-                JournalEntry(
-                    date,
-                    payment.account,
-                    JournalAmount::Debit(payment.amount.clone()),
-                ),
+                JournalEntry(date, payment.account, Debit(payment.amount.clone())),
                 JournalEntry(
                     date,
                     "Accounts Recievable".to_string(), // TODO include party
-                    JournalAmount::Credit(payment.amount.clone()),
+                    Credit(payment.amount.clone()),
                 ),
             ]),
         }
