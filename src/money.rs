@@ -47,7 +47,7 @@ impl Add<Money> for Money {
 }
 
 #[cfg(test)]
-mod tests {
+mod money_tests {
     use super::*;
     use std::convert::TryInto;
 

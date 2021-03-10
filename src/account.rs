@@ -3,6 +3,7 @@ use self::AssetsAccount::*;
 use self::ExpensesAccount::*;
 use self::LiabilitiesAccount::*;
 use anyhow::Result;
+use std::fmt;
 
 type Name = String;
 
@@ -15,7 +16,7 @@ pub struct COSInfo(Name);
 #[derive(Debug)]
 pub struct Party(Name);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Account {
     Expenses(ExpensesAccount),
     Assets(AssetsAccount),
@@ -24,62 +25,156 @@ pub enum Account {
     Revenue(GenericCreditAccount),
 }
 
-#[derive(Debug)]
+impl Account {
+    pub fn new_expense_account(name: &str) -> Self {
+        Expenses(ExpensesAccount::Generic(GenericDebitAccount {
+            name: name.to_owned(),
+        }))
+    }
+
+    pub fn new_revenue_account(name: &str) -> Self {
+        Revenue(GenericCreditAccount {
+            name: name.to_owned(),
+        })
+    }
+
+    pub fn new_accounts_payable(party: &str) -> Self {
+        Liabilities(AccountsPayable(AccountsPayableAccount {
+            party: party.to_owned(),
+        }))
+    }
+
+    pub fn new_accounts_receivable(party: &str) -> Self {
+        Assets(AccountsReceivable(AccountsReceivableAccount {
+            party: party.to_owned(),
+        }))
+    }
+
+    pub fn new_bank_account(name: &str, account_number: &str) -> Self {
+        Assets(Bank(BankAccount {
+            name: name.to_owned(),
+            account_number: account_number.to_owned(),
+        }))
+    }
+
+    pub fn new_credit_card_account(name: &str, account_number: &str) -> Self {
+        Liabilities(CreditCard(CreditCardAccount {
+            name: name.to_owned(),
+            account_number: account_number.to_owned(),
+        }))
+    }
+}
+
+impl fmt::Display for Account {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let string = match self {
+            Expenses(ExpensesAccount::Generic(GenericDebitAccount { name }))
+            | Liabilities(LiabilitiesAccount::Generic(GenericCreditAccount { name, .. }))
+            | Revenue(GenericCreditAccount { name })
+            | Assets(Bank(BankAccount { name, .. }))
+            | Liabilities(CreditCard(CreditCardAccount { name, .. }))
+            | Assets(AssetsAccount::Generic(GenericDebitAccount { name }))
+            | Equity(GenericCreditAccount { name }) => name,
+            Liabilities(AccountsPayable(_)) => "Accounts Payable",
+            Assets(AccountsReceivable(_)) => "Accounts Receivable",
+            Expenses(CostOfSales(_)) => "Cost of Sales",
+        };
+        write!(f, "{}", string)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum ExpensesAccount {
     Generic(GenericDebitAccount),
     CostOfSales(CostOfSalesAccount),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AssetsAccount {
     Generic(GenericDebitAccount),
-    AccountsRecievable(AccountsRecievableAccount),
+    AccountsReceivable(AccountsReceivableAccount),
     Bank(BankAccount),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum LiabilitiesAccount {
     Generic(GenericCreditAccount),
     AccountsPayable(AccountsPayableAccount),
     CreditCard(CreditCardAccount),
 }
 
-#[derive(Debug)]
-struct GenericDebitAccount {
+#[derive(Debug, Clone)]
+pub struct GenericDebitAccount {
     name: String,
 }
 
-#[derive(Debug)]
-struct GenericCreditAccount {
+impl GenericDebitAccount {
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GenericCreditAccount {
     name: String,
 }
 
-#[derive(Debug)]
-struct CostOfSalesAccount {
+impl GenericCreditAccount {
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CostOfSalesAccount {
     name: String,
     code: String,
 }
 
-#[derive(Debug)]
-struct AccountsRecievableAccount {
+#[derive(Debug, Clone)]
+pub struct AccountsReceivableAccount {
     party: String,
 }
 
-#[derive(Debug)]
-struct AccountsPayableAccount {
+impl AccountsReceivableAccount {
+    pub fn party(&self) -> String {
+        self.party.clone()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AccountsPayableAccount {
     party: String,
 }
 
-#[derive(Debug)]
-struct BankAccount {
+impl AccountsPayableAccount {
+    pub fn party(&self) -> String {
+        self.party.clone()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BankAccount {
     name: String,
     account_number: String,
 }
 
-#[derive(Debug)]
-struct CreditCardAccount {
+impl BankAccount {
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CreditCardAccount {
     name: String,
     account_number: String,
+}
+
+impl CreditCardAccount {
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
 }
 
 #[cfg(test)]
@@ -106,12 +201,12 @@ mod tests {
 
     #[test]
     fn accounts_recievable() -> () {
-        let acc = Assets(AccountsRecievable(AccountsRecievableAccount {
+        let acc = Assets(AccountsReceivable(AccountsReceivableAccount {
             party: String::from("ACME Business Services"),
         }));
         dbg!(&acc);
         let party = match acc {
-            Assets(AccountsRecievable(AccountsRecievableAccount { party })) => party,
+            Assets(AccountsReceivable(AccountsReceivableAccount { party })) => party,
             _ => String::from("Other"),
         };
         assert_eq!(party, String::from("ACME Business Services"));
