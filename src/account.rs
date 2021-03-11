@@ -2,7 +2,7 @@ use self::Account::*;
 use self::AssetsAccount::*;
 use self::ExpensesAccount::*;
 use self::LiabilitiesAccount::*;
-use anyhow::Result;
+
 use std::fmt;
 
 type Name = String;

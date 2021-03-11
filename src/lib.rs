@@ -10,7 +10,7 @@ use async_walkdir::{DirEntry, WalkDir};
 use chart_of_accounts::ChartOfAccounts;
 use entry::raw_entry::RawEntry;
 use entry::Entry;
-use futures::stream::{self, StreamExt, TryStream, TryStreamExt};
+use futures::stream::{self, StreamExt, TryStreamExt};
 use journal_entry::JournalEntry;
 use std::convert::TryInto;
 
