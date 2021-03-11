@@ -23,7 +23,7 @@ impl JournalEntry {
                     .map(|item| {
                         Ok(JournalEntry(
                             date,
-                            accounts.get_or_create_expense_account(&item.account),
+                            Account::new_expense_account(&item.account),
                             Debit(item.total()?),
                         ))
                     })
@@ -37,7 +37,7 @@ impl JournalEntry {
                 let credit_entry = match invoice.payment {
                     None => JournalEntry(
                         date,
-                        accounts.get_or_create_accounts_payable(&invoice.party),
+                        Account::new_accounts_payable(&invoice.party),
                         credit_amount,
                     ),
                     Some(payment) => JournalEntry(
@@ -62,7 +62,7 @@ impl JournalEntry {
                 ),
                 JournalEntry(
                     date,
-                    accounts.get_or_create_accounts_payable(&payment.party),
+                    Account::new_accounts_payable(&payment.party),
                     Debit(payment.amount.clone()),
                 ),
             ]),
@@ -73,7 +73,7 @@ impl JournalEntry {
                 .map(|item| {
                     Ok(JournalEntry(
                         date,
-                        accounts.get_or_create_revenue_account(&item.account),
+                        Account::new_revenue_account(&item.account),
                         Credit(item.total()?),
                     ))
                 })
@@ -89,7 +89,7 @@ impl JournalEntry {
                 ),
                 JournalEntry(
                     date,
-                    accounts.get_or_create_accounts_receivable(&payment.party),
+                    Account::new_accounts_receivable(&payment.party),
                     Credit(payment.amount.clone()),
                 ),
             ]),

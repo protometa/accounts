@@ -39,7 +39,7 @@ async fn test_multiple_entries_in_one_file() -> Result<()> {
 
 #[async_std::test]
 async fn test_journal_from_entries() -> Result<()> {
-    let ledger = Ledger::new("./tests/fixtures/entries");
+    let mut ledger = Ledger::new("./tests/fixtures/entries");
     ledger
         .chart_of_accounts
         .create_bank_account("Business Checking", "000000");
