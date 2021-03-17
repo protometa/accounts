@@ -45,7 +45,7 @@ impl Ledger {
                     let content = fs::read_to_string(&path).await?;
                     let docs: Vec<String> = content
                         .trim_start_matches("---")
-                        .split("---")
+                        .split("\n---\n")
                         // only way I can tell to avoid returning reference to content
                         .map(ToOwned::to_owned)
                         .collect();
