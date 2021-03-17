@@ -67,17 +67,41 @@ impl JournalEntry {
                 ),
             ]),
 
-            EntryBody::SaleInvoice(invoice) => invoice
-                .items
-                .iter()
-                .map(|item| {
-                    Ok(JournalEntry(
+            EntryBody::SaleInvoice(invoice) => {
+                let mut entries = invoice
+                    .items
+                    .iter()
+                    .map(|item| {
+                        Ok(JournalEntry(
+                            date,
+                            Account::new_revenue_account(&item.account),
+                            Debit(item.total()?),
+                        ))
+                    })
+                    .collect::<Result<Vec<Self>>>()?; // TODO include inventory entries if tracking
+                let debit_amount = Credit(
+                    invoice
+                        .items
+                        .iter()
+                        .fold(Money::try_from(0.0), |acc, item| Ok(acc? + item.total()?))?,
+                );
+                let debit_entry = match invoice.payment {
+                    None => JournalEntry(
                         date,
-                        Account::new_revenue_account(&item.account),
-                        Credit(item.total()?),
-                    ))
-                })
-                .collect(), // TODO include Dedit entry, entries from included payment, and inventory if tracking
+                        Account::new_accounts_receivable(&invoice.party),
+                        debit_amount,
+                    ),
+                    Some(payment) => JournalEntry(
+                        date,
+                        accounts
+                            .get_payment_account(&payment.account)
+                            .context("No payment account found in Chart of Accounts")?,
+                        debit_amount,
+                    ),
+                };
+                entries.push(debit_entry);
+                Ok(entries)
+            }
 
             EntryBody::PaymentReceived(payment) => Ok(vec![
                 JournalEntry(
