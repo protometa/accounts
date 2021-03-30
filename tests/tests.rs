@@ -64,14 +64,14 @@ async fn test_journal_from_entries() -> Result<()> {
          | 3000-01-03 | Business Checking         |              |       $50.00 |\n\
          | 3000-01-04 | Operating Expenses        |      $100.00 |              |\n\
          | 3000-01-04 | Accounts Payable          |              |      $100.00 |\n\
-         | 3000-01-05 | Widget Sales              |       $10.00 |              |\n\
-         | 3000-01-05 | Accounts Receivable       |              |       $10.00 |\n\
+         | 3000-01-05 | Widget Sales              |              |       $10.00 |\n\
+         | 3000-01-05 | Accounts Receivable       |       $10.00 |              |\n\
          | 3000-01-06 | Business Checking         |       $10.00 |              |\n\
          | 3000-01-06 | Accounts Receivable       |              |       $10.00 |\n\
-         | 3000-01-07 | Widget Sales              |        $5.00 |              |\n\
-         | 3000-01-07 | Business Checking         |              |        $5.00 |\n\
-         | 3000-01-08 | Widget Sales              |       $10.00 |              |\n\
-         | 3000-01-08 | Accounts Receivable       |              |       $10.00 |"
+         | 3000-01-07 | Widget Sales              |              |        $5.00 |\n\
+         | 3000-01-07 | Business Checking         |        $5.00 |              |\n\
+         | 3000-01-08 | Widget Sales              |              |       $10.00 |\n\
+         | 3000-01-08 | Accounts Receivable       |       $10.00 |              |"
     );
     Ok(())
 }

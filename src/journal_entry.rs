@@ -75,11 +75,11 @@ impl JournalEntry {
                         Ok(JournalEntry(
                             date,
                             Account::new_revenue_account(&item.account),
-                            Debit(item.total()?),
+                            Credit(item.total()?),
                         ))
                     })
                     .collect::<Result<Vec<Self>>>()?; // TODO include inventory entries if tracking
-                let debit_amount = Credit(
+                let debit_amount = Debit(
                     invoice
                         .items
                         .iter()
