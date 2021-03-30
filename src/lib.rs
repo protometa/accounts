@@ -2,8 +2,9 @@ pub mod account;
 pub mod chart_of_accounts;
 pub mod entry;
 pub mod journal_entry;
-mod money;
+pub mod money;
 
+use account::Account;
 use anyhow::{Context, Error, Result};
 use async_std::fs;
 use async_walkdir::{DirEntry, WalkDir};
@@ -12,6 +13,9 @@ use entry::raw_entry::RawEntry;
 use entry::Entry;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use journal_entry::JournalEntry;
+use money::Money;
+use num_traits::identities::Zero;
+use std::collections::HashMap;
 use std::convert::TryInto;
 
 pub struct Ledger {
@@ -92,13 +96,25 @@ impl Ledger {
         Ok(stream)
     }
 
-    // pub async fn balance(entries: impl TryStreamExt<Ok = Entry, Error = Error>) -> Result<()> {
-    //     entries
-    //         .try_for_each(|entry: Entry| async {
-    //             dbg!(entry);
-    //             Ok(())
-    //         })
-    //         .await?;
-    //     Ok(())
-    // }
+    pub async fn balances(&self) -> Result<HashMap<Account, Money>> {
+        let balance = self
+            .journal()
+            .await?
+            .try_fold(
+                HashMap::new(),
+                |mut acc, JournalEntry(_, account, amount)| async move {
+                    dbg!((&account, acc.get(&account), &amount));
+                    acc.entry(account.clone())
+                        .and_modify(|total| account.add(total, amount.clone()))
+                        .or_insert({
+                            let mut zero = Money::zero();
+                            account.add(&mut zero, amount);
+                            zero
+                        });
+                    Ok(acc)
+                },
+            )
+            .await?;
+        Ok(balance)
+    }
 }

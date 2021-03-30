@@ -10,7 +10,7 @@ use std::convert::TryFrom;
 use std::fmt;
 
 #[derive(Debug)]
-pub struct JournalEntry(NaiveDate, Account, JournalAmount);
+pub struct JournalEntry(pub NaiveDate, pub Account, pub JournalAmount);
 
 impl JournalEntry {
     pub fn from_entry(entry: Entry, accounts: &ChartOfAccounts) -> Result<Vec<Self>> {
@@ -128,8 +128,8 @@ impl fmt::Display for JournalEntry {
     }
 }
 
-#[derive(Debug)]
-enum JournalAmount {
+#[derive(Debug, Clone)]
+pub enum JournalAmount {
     Debit(Money),
     Credit(Money),
 }

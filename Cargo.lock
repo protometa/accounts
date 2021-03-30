@@ -10,6 +10,7 @@ dependencies = [
  "chrono",
  "futures",
  "itertools",
+ "num-traits",
  "rust_decimal",
  "serde",
  "serde_yaml",

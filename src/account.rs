@@ -2,6 +2,9 @@ use self::Account::*;
 use self::AssetsAccount::*;
 use self::ExpensesAccount::*;
 use self::LiabilitiesAccount::*;
+use super::journal_entry::JournalAmount;
+use super::money::Money;
+use std::cmp::Eq;
 
 use std::fmt;
 
@@ -16,7 +19,7 @@ pub struct COSInfo(Name);
 #[derive(Debug)]
 pub struct Party(Name);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Account {
     Expenses(ExpensesAccount),
     Assets(AssetsAccount),
@@ -63,6 +66,19 @@ impl Account {
             account_number: account_number.to_owned(),
         }))
     }
+
+    pub fn add(&self, total: &mut Money, amount: JournalAmount) {
+        match self {
+            Expenses(_) | Assets(_) => match amount {
+                JournalAmount::Debit(money) => *total += money,
+                JournalAmount::Credit(money) => *total -= money,
+            },
+            Liabilities(_) | Revenue(_) | Equity(_) => match amount {
+                JournalAmount::Credit(money) => *total += money,
+                JournalAmount::Debit(money) => *total -= money,
+            },
+        };
+    }
 }
 
 impl fmt::Display for Account {
@@ -83,27 +99,27 @@ impl fmt::Display for Account {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum ExpensesAccount {
     Generic(GenericDebitAccount),
     CostOfSales(CostOfSalesAccount),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum AssetsAccount {
     Generic(GenericDebitAccount),
     AccountsReceivable(AccountsReceivableAccount),
     Bank(BankAccount),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum LiabilitiesAccount {
     Generic(GenericCreditAccount),
     AccountsPayable(AccountsPayableAccount),
     CreditCard(CreditCardAccount),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct GenericDebitAccount {
     name: String,
 }
@@ -114,7 +130,7 @@ impl GenericDebitAccount {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct GenericCreditAccount {
     name: String,
 }
@@ -125,13 +141,13 @@ impl GenericCreditAccount {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct CostOfSalesAccount {
     name: String,
     code: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct AccountsReceivableAccount {
     party: String,
 }
@@ -142,7 +158,7 @@ impl AccountsReceivableAccount {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct AccountsPayableAccount {
     party: String,
 }
@@ -153,7 +169,7 @@ impl AccountsPayableAccount {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct BankAccount {
     name: String,
     account_number: String,
@@ -165,7 +181,7 @@ impl BankAccount {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct CreditCardAccount {
     name: String,
     account_number: String,

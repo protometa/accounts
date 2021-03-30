@@ -1,10 +1,13 @@
 use anyhow::{Context, Error, Result};
 use rust_decimal::prelude::*;
+use std::cmp::Eq;
 use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Add;
+use std::ops::AddAssign;
+use std::ops::SubAssign;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Money(pub Decimal);
 
 /// Basically this holds a Decimal that is scaled out to at least 2 dp (doesn't round).
@@ -20,10 +23,20 @@ impl TryFrom<f64> for Money {
     }
 }
 
+impl Zero for Money {
+    fn zero() -> Self {
+        Money(Decimal::zero())
+    }
+
+    fn is_zero(&self) -> bool {
+        self.0.is_zero()
+    }
+}
+
 impl fmt::Display for Money {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.0.is_sign_negative() {
-            write!(f, "(${})", self.0)
+            write!(f, "(${})", -self.0)
         } else {
             write!(f, "${}", self.0)
         }
@@ -43,6 +56,18 @@ impl Add<Money> for Money {
 
     fn add(self, other: Money) -> Money {
         Money(self.0 + other.0)
+    }
+}
+
+impl AddAssign<Money> for Money {
+    fn add_assign(&mut self, other: Self) {
+        self.0 += other.0
+    }
+}
+
+impl SubAssign<Money> for Money {
+    fn sub_assign(&mut self, other: Self) {
+        self.0 -= other.0
     }
 }
 

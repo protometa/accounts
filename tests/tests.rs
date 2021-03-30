@@ -1,9 +1,13 @@
+
 use accounts::entry::Entry;
+
+
 
 use accounts::*;
 use anyhow::Result;
 use futures::stream::TryStreamExt;
 use itertools::Itertools;
+
 
 #[async_std::test]
 async fn test_basic_entries() -> Result<()> {
@@ -73,5 +77,59 @@ async fn test_journal_from_entries() -> Result<()> {
          | 3000-01-08 | Widget Sales              |              |       $10.00 |\n\
          | 3000-01-08 | Accounts Receivable       |       $10.00 |              |"
     );
+    Ok(())
+}
+
+fn contains_balance(balances_strings: &Vec<(String, String)>, account: &str, amount: &str) -> bool {
+    balances_strings.contains(&(String::from(account), String::from(amount)))
+}
+
+#[async_std::test]
+async fn test_balance() -> Result<()> {
+    let mut ledger = Ledger::new("./tests/fixtures/entries");
+    ledger
+        .chart_of_accounts
+        .create_bank_account("Business Checking", "000000");
+    ledger
+        .chart_of_accounts
+        .create_credit_card_account("Credit Card", "000000");
+
+    let balances = ledger.balances().await?;
+    let balances_strings: Vec<(String, String)> = balances
+        .iter()
+        .map(|(account, amount)| (account.to_string(), amount.to_string()))
+        .collect();
+    dbg!(&balances_strings);
+    assert_eq!(balances_strings.len(), 6);
+    assert!(contains_balance(
+        &balances_strings,
+        "Operating Expenses",
+        "$250.00"
+    ));
+    assert!(contains_balance(
+        &balances_strings,
+        "Accounts Payable",
+        "$100.00"
+    ));
+    assert!(contains_balance(
+        &balances_strings,
+        "Credit Card",
+        "$100.00"
+    ));
+    assert!(contains_balance(
+        &balances_strings,
+        "Business Checking",
+        "($35.00)"
+    ));
+    assert!(contains_balance(
+        &balances_strings,
+        "Widget Sales",
+        "$25.00"
+    ));
+    assert!(contains_balance(
+        &balances_strings,
+        "Accounts Receivable",
+        "$10.00"
+    ));
     Ok(())
 }
