@@ -5,6 +5,7 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Add;
 use std::ops::AddAssign;
+use std::ops::Sub;
 use std::ops::SubAssign;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -51,11 +52,27 @@ impl<'a, 'b> Add<&'b Money> for &'a Money {
     }
 }
 
+impl Add<&Money> for Money {
+    type Output = Money;
+
+    fn add(self, other: &Money) -> Money {
+        Money(self.0 + other.0)
+    }
+}
+
 impl Add<Money> for Money {
     type Output = Money;
 
     fn add(self, other: Money) -> Money {
         Money(self.0 + other.0)
+    }
+}
+
+impl Sub<&Money> for &Money {
+    type Output = Money;
+
+    fn sub(self, other: &Money) -> Money {
+        Money(self.0 - (*other).0)
     }
 }
 
