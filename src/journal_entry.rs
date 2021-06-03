@@ -44,7 +44,10 @@ impl JournalEntry {
                         date,
                         accounts
                             .get_payment_account(&payment.account)
-                            .context("No payment account found in Chart of Accounts")?,
+                            .context(format!(
+                                "No payment account \"{}\" found in Chart of Accounts",
+                                &payment.account
+                            ))?,
                         credit_amount,
                     ),
                 };
@@ -57,7 +60,10 @@ impl JournalEntry {
                     date,
                     accounts
                         .get_payment_account(&payment.account)
-                        .context("No payment account found in Chart of Accounts")?,
+                        .context(format!(
+                            "No payment account \"{}\" found in Chart of Accounts",
+                            &payment.account
+                        ))?,
                     Credit(payment.amount.clone()),
                 ),
                 JournalEntry(
@@ -95,7 +101,10 @@ impl JournalEntry {
                         date,
                         accounts
                             .get_payment_account(&payment.account)
-                            .context("No payment account found in Chart of Accounts")?,
+                            .context(format!(
+                                "No payment account \"{}\" found in Chart of Accounts",
+                                &payment.account
+                            ))?,
                         debit_amount,
                     ),
                 };
@@ -108,7 +117,10 @@ impl JournalEntry {
                     date,
                     accounts
                         .get_payment_account(&payment.account)
-                        .context("No payment account found in Chart of Accounts")?,
+                        .context(format!(
+                            "No payment account \"{}\" found in Chart of Accounts",
+                            &payment.account
+                        ))?,
                     Debit(payment.amount.clone()),
                 ),
                 JournalEntry(
