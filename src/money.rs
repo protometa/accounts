@@ -82,6 +82,12 @@ impl AddAssign<Money> for Money {
     }
 }
 
+impl AddAssign<&Money> for Money {
+    fn add_assign(&mut self, other: &Self) {
+        self.0 += other.0
+    }
+}
+
 impl SubAssign<Money> for Money {
     fn sub_assign(&mut self, other: Self) {
         self.0 -= other.0

@@ -4,7 +4,6 @@ pub mod entry;
 pub mod journal_entry;
 pub mod money;
 
-use account::Account;
 use anyhow::{Context, Error, Result};
 use async_std::fs;
 use async_walkdir::{DirEntry, WalkDir};
@@ -12,11 +11,45 @@ use chart_of_accounts::ChartOfAccounts;
 use entry::raw_entry::RawEntry;
 use entry::Entry;
 use futures::stream::{self, StreamExt, TryStreamExt};
-use journal_entry::JournalEntry;
+use journal_entry::{JournalAccount, JournalAmount, JournalEntry};
 use money::Money;
 use num_traits::identities::Zero;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::ops::AddAssign;
+
+#[derive(Debug, Clone)]
+pub struct JournalTotal {
+    pub debits: Money,
+    pub credits: Money,
+}
+
+impl JournalTotal {
+    fn new() -> Self {
+        JournalTotal {
+            debits: Money::zero(),
+            credits: Money::zero(),
+        }
+    }
+}
+
+impl<'a> AddAssign<&JournalAmount> for &'a mut JournalTotal {
+    fn add_assign(&mut self, other: &JournalAmount) {
+        match other {
+            JournalAmount::Debit(debit) => self.debits += debit,
+            JournalAmount::Credit(credit) => self.credits += credit,
+        };
+    }
+}
+
+impl AddAssign<&JournalAmount> for JournalTotal {
+    fn add_assign(&mut self, other: &JournalAmount) {
+        match other {
+            JournalAmount::Debit(debit) => self.debits += debit,
+            JournalAmount::Credit(credit) => self.credits += credit,
+        };
+    }
+}
 
 pub struct Ledger {
     pub chart_of_accounts: ChartOfAccounts,
@@ -86,7 +119,7 @@ impl Ledger {
             .entries()
             .await?
             .and_then(move |entry| {
-                let journal_entry = JournalEntry::from_entry(entry, &self.chart_of_accounts);
+                let journal_entry = JournalEntry::from_entry(entry);
                 async {
                     let stream = stream::iter(journal_entry?).map(|x| Ok(x));
                     Ok(stream)
@@ -96,20 +129,22 @@ impl Ledger {
         Ok(stream)
     }
 
-    pub async fn balances(&self) -> Result<HashMap<Account, Money>> {
+    pub async fn balances(&self) -> Result<HashMap<JournalAccount, JournalTotal>> {
         let balance = self
             .journal()
             .await?
             .try_fold(
                 HashMap::new(),
                 |mut acc, JournalEntry(_, account, amount)| async move {
-                    dbg!((&account, acc.get(&account), &amount));
+                    // dbg!((&account, acc.get(&account), &amount));
                     acc.entry(account.clone())
-                        .and_modify(|total| account.add(total, amount.clone()))
+                        .and_modify(|total: &mut JournalTotal| {
+                            total.add_assign(&amount);
+                        })
                         .or_insert({
-                            let mut zero = Money::zero();
-                            account.add(&mut zero, amount);
-                            zero
+                            let mut new = JournalTotal::new();
+                            new.add_assign(&amount);
+                            new
                         });
                     Ok(acc)
                 },

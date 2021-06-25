@@ -1,10 +1,5 @@
 use super::account::*;
 
-use Account::*;
-use AssetsAccount::*;
-
-use LiabilitiesAccount::*;
-
 pub type AccountId = usize;
 
 pub struct ChartOfAccounts(Vec<Account>);
@@ -16,17 +11,6 @@ impl ChartOfAccounts {
 
     pub fn get(&self, index: AccountId) -> Option<Account> {
         self.0.get(index).map(|account| account.to_owned())
-    }
-
-    pub fn get_payment_account(&self, name: &str) -> Option<Account> {
-        self.0
-            .iter()
-            .find(|account| match account {
-                Assets(Bank(account)) if &account.name() == name => true,
-                Liabilities(CreditCard(account)) if &account.name() == name => true,
-                _ => false,
-            })
-            .map(Clone::clone)
     }
 
     pub fn create_bank_account(&mut self, name: &str, account_number: &str) -> Account {
