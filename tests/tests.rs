@@ -70,76 +70,57 @@ async fn test_journal_from_entries() -> Result<()> {
 }
 
 fn contains_balance(
-    balances_strings: &Vec<(String, String, String)>,
+    balances_strings: &Vec<(String, String)>,
     account: &str,
     debits: &str,
-    credits: &str,
+    // credits: &str,
 ) -> bool {
     balances_strings.contains(&(
         String::from(account),
         String::from(debits),
-        String::from(credits),
+        // String::from(credits),
     ))
 }
 
 #[async_std::test]
 async fn test_balance() -> Result<()> {
-    let mut ledger = Ledger::new("./tests/fixtures/entries");
-    ledger
-        .chart_of_accounts
-        .create_bank_account("Business Checking", "000000");
-    ledger
-        .chart_of_accounts
-        .create_credit_card_account("Credit Card", "000000");
-
+    let ledger = Ledger::new("./tests/fixtures/entries");
     let balances = ledger.balances().await?;
-    let balances_strings: Vec<(String, String, String)> = balances
+    let balances_strings: Vec<(String, String)> = balances
         .iter()
-        .map(|(account, amount)| {
-            (
-                account.to_string(),
-                amount.debits.to_string(),
-                amount.credits.to_string(),
-            )
-        })
+        .map(|(account, amount)| (account.to_string(), amount.to_string()))
         .collect();
     dbg!(&balances_strings);
     assert_eq!(balances_strings.len(), 6);
     assert!(contains_balance(
         &balances_strings,
         "Operating Expenses",
-        "$250.00",
-        "$0"
+        "     $250.00 |             "
     ));
     assert!(contains_balance(
         &balances_strings,
         "Accounts Payable",
-        "$100.00",
-        "$200.00"
+        "             |      $100.00"
     ));
     assert!(contains_balance(
         &balances_strings,
         "Credit Card",
-        "$0",
-        "$100.00"
+        "             |      $100.00"
     ));
     assert!(contains_balance(
         &balances_strings,
         "Business Checking",
-        "$15.00",
-        "$50.00",
+        "             |       $35.00"
     ));
     assert!(contains_balance(
         &balances_strings,
         "Widget Sales",
-        "$0",
-        "$25.00"
+        "             |       $25.00"
     ));
     assert!(contains_balance(
         &balances_strings,
         "Accounts Receivable",
-        "$20.00",
-        "$10.00"
+        "      $10.00 |             "
     ));
     Ok(())
 }

@@ -3,12 +3,9 @@ use rust_decimal::prelude::*;
 use std::cmp::Eq;
 use std::convert::TryFrom;
 use std::fmt;
-use std::ops::Add;
-use std::ops::AddAssign;
-use std::ops::Sub;
-use std::ops::SubAssign;
+use std::ops::*;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd)]
 pub struct Money(pub Decimal);
 
 /// Basically this holds a Decimal that is scaled out to at least 2 dp (doesn't round).
@@ -44,23 +41,7 @@ impl fmt::Display for Money {
     }
 }
 
-impl<'a, 'b> Add<&'b Money> for &'a Money {
-    type Output = Money;
-
-    fn add(self, other: &Money) -> Money {
-        Money(self.0 + (*other).0)
-    }
-}
-
-impl Add<&Money> for Money {
-    type Output = Money;
-
-    fn add(self, other: &Money) -> Money {
-        Money(self.0 + other.0)
-    }
-}
-
-impl Add<Money> for Money {
+impl Add for Money {
     type Output = Money;
 
     fn add(self, other: Money) -> Money {
@@ -68,29 +49,24 @@ impl Add<Money> for Money {
     }
 }
 
-impl Sub<&Money> for &Money {
+impl Sub for Money {
     type Output = Money;
 
-    fn sub(self, other: &Money) -> Money {
-        Money(self.0 - (*other).0)
+    fn sub(self, other: Money) -> Money {
+        Money(self.0 - other.0)
     }
 }
 
-impl AddAssign<Money> for Money {
+impl AddAssign for Money {
     fn add_assign(&mut self, other: Self) {
         self.0 += other.0
     }
 }
 
-impl AddAssign<&Money> for Money {
-    fn add_assign(&mut self, other: &Self) {
-        self.0 += other.0
-    }
-}
-
-impl SubAssign<Money> for Money {
-    fn sub_assign(&mut self, other: Self) {
-        self.0 -= other.0
+impl Neg for Money {
+    type Output = Money;
+    fn neg(self) -> Money {
+        Money(-self.0)
     }
 }
 

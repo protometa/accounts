@@ -12,44 +12,9 @@ use entry::raw_entry::RawEntry;
 use entry::Entry;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use journal_entry::{JournalAccount, JournalAmount, JournalEntry};
-use money::Money;
-use num_traits::identities::Zero;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ops::AddAssign;
-
-#[derive(Debug, Clone)]
-pub struct JournalTotal {
-    pub debits: Money,
-    pub credits: Money,
-}
-
-impl JournalTotal {
-    fn new() -> Self {
-        JournalTotal {
-            debits: Money::zero(),
-            credits: Money::zero(),
-        }
-    }
-}
-
-impl<'a> AddAssign<&JournalAmount> for &'a mut JournalTotal {
-    fn add_assign(&mut self, other: &JournalAmount) {
-        match other {
-            JournalAmount::Debit(debit) => self.debits += debit,
-            JournalAmount::Credit(credit) => self.credits += credit,
-        };
-    }
-}
-
-impl AddAssign<&JournalAmount> for JournalTotal {
-    fn add_assign(&mut self, other: &JournalAmount) {
-        match other {
-            JournalAmount::Debit(debit) => self.debits += debit,
-            JournalAmount::Credit(credit) => self.credits += credit,
-        };
-    }
-}
 
 pub struct Ledger {
     pub chart_of_accounts: ChartOfAccounts,
@@ -129,7 +94,7 @@ impl Ledger {
         Ok(stream)
     }
 
-    pub async fn balances(&self) -> Result<HashMap<JournalAccount, JournalTotal>> {
+    pub async fn balances(&self) -> Result<HashMap<JournalAccount, JournalAmount>> {
         let balance = self
             .journal()
             .await?
@@ -138,12 +103,12 @@ impl Ledger {
                 |mut acc, JournalEntry(_, account, amount)| async move {
                     // dbg!((&account, acc.get(&account), &amount));
                     acc.entry(account.clone())
-                        .and_modify(|total: &mut JournalTotal| {
-                            total.add_assign(&amount);
+                        .and_modify(|total: &mut JournalAmount| {
+                            total.add_assign(amount);
                         })
                         .or_insert({
-                            let mut new = JournalTotal::new();
-                            new.add_assign(&amount);
+                            let mut new = JournalAmount::new();
+                            new.add_assign(amount);
                             new
                         });
                     Ok(acc)
