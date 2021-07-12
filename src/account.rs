@@ -1,195 +1,193 @@
-use self::Account::*;
-use self::AssetsAccount::*;
-use self::ExpensesAccount::*;
-use self::LiabilitiesAccount::*;
-use super::journal_entry::JournalAmount;
-use super::money::Money;
-use std::cmp::Eq;
+use self::Class::*;
+use anyhow::{bail, Result};
 
-use std::fmt;
-
-type Name = String;
-
-#[derive(Debug)]
-pub struct Info(Name);
-
-#[derive(Debug)]
-pub struct COSInfo(Name);
-
-#[derive(Debug)]
-pub struct Party(Name);
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum Account {
-    Expenses(ExpensesAccount),
-    Assets(AssetsAccount),
-    Liabilities(LiabilitiesAccount),
-    Equity(GenericCreditAccount),
-    Revenue(GenericCreditAccount),
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Class {
+    Asset,
+    Liability,
+    Expense,
+    Revenue,
+    Equity,
 }
 
-impl Account {
-    pub fn new_expense_account(name: &str) -> Self {
-        Expenses(ExpensesAccount::Generic(GenericDebitAccount {
-            name: name.to_owned(),
-        }))
-    }
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tag(String);
 
-    pub fn new_revenue_account(name: &str) -> Self {
-        Revenue(GenericCreditAccount {
-            name: name.to_owned(),
-        })
-    }
-
-    pub fn new_accounts_payable(party: &str) -> Self {
-        Liabilities(AccountsPayable(AccountsPayableAccount {
-            party: party.to_owned(),
-        }))
-    }
-
-    pub fn new_accounts_receivable(party: &str) -> Self {
-        Assets(AccountsReceivable(AccountsReceivableAccount {
-            party: party.to_owned(),
-        }))
-    }
-
-    pub fn new_bank_account(name: &str, account_number: &str) -> Self {
-        Assets(Bank(BankAccount {
-            name: name.to_owned(),
-            account_number: account_number.to_owned(),
-        }))
-    }
-
-    pub fn new_credit_card_account(name: &str, account_number: &str) -> Self {
-        Liabilities(CreditCard(CreditCardAccount {
-            name: name.to_owned(),
-            account_number: account_number.to_owned(),
-        }))
-    }
-
-    pub fn add(&self, total: &mut Money, amount: JournalAmount) {
-        match self {
-            Expenses(_) | Assets(_) => match amount {
-                JournalAmount::Debit(money) => *total += money,
-                JournalAmount::Credit(money) => *total -= money,
-            },
-            Liabilities(_) | Revenue(_) | Equity(_) => match amount {
-                JournalAmount::Credit(money) => *total += money,
-                JournalAmount::Debit(money) => *total -= money,
-            },
-        };
+impl Tag {
+    pub fn new(tag: &str) -> Result<Self> {
+        let limit = 32;
+        if tag.len() > limit {
+            bail!("Tag is longer than {} characters: {}", limit, tag);
+        }
+        Ok(Self(tag.to_lowercase()))
     }
 }
 
-impl fmt::Display for Account {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let string = match self {
-            Expenses(ExpensesAccount::Generic(GenericDebitAccount { name }))
-            | Liabilities(LiabilitiesAccount::Generic(GenericCreditAccount { name, .. }))
-            | Revenue(GenericCreditAccount { name })
-            | Assets(Bank(BankAccount { name, .. }))
-            | Liabilities(CreditCard(CreditCardAccount { name, .. }))
-            | Assets(AssetsAccount::Generic(GenericDebitAccount { name }))
-            | Equity(GenericCreditAccount { name }) => name,
-            Liabilities(AccountsPayable(_)) => "Accounts Payable",
-            Assets(AccountsReceivable(_)) => "Accounts Receivable",
-            Expenses(CostOfSales(_)) => "Cost of Sales",
-        };
-        write!(f, "{}", string)
+#[macro_export]
+macro_rules! tags {
+    ($($tag:expr),*) => {{
+        let mut v = Vec::new();
+        $(v.push(Tag::new($tag));)*
+        v.into_iter().collect::<Result<Vec<_>>>()
+    }};
+}
+
+pub trait Account {
+    fn name(&self) -> String;
+
+    fn class(&self) -> Class;
+
+    fn is_debit(&self) -> bool {
+        match self.class() {
+            Asset | Expense => true,
+            Liability | Revenue | Equity => false,
+        }
+    }
+
+    fn is_credit(&self) -> bool {
+        !self.is_debit()
+    }
+
+    fn tags(&self) -> Vec<Tag> {
+        Vec::new()
+    }
+
+    fn has_tag(&self, tag: &str) -> bool {
+        self.tags().iter().any(|e| e.0 == tag.to_lowercase())
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum ExpensesAccount {
-    Generic(GenericDebitAccount),
-    CostOfSales(CostOfSalesAccount),
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum AssetsAccount {
-    Generic(GenericDebitAccount),
-    AccountsReceivable(AccountsReceivableAccount),
-    Bank(BankAccount),
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum LiabilitiesAccount {
-    Generic(GenericCreditAccount),
-    AccountsPayable(AccountsPayableAccount),
-    CreditCard(CreditCardAccount),
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct GenericDebitAccount {
+pub struct GenericAccount {
+    class: Class,
     name: String,
+    tags: Vec<Tag>,
 }
 
-impl GenericDebitAccount {
-    pub fn name(&self) -> String {
+impl GenericAccount {
+    pub fn new(class: Class, name: &str, tags: Vec<Tag>) -> Self {
+        GenericAccount {
+            name: name.to_owned(),
+            class,
+            tags,
+        }
+    }
+}
+
+impl Account for GenericAccount {
+    fn name(&self) -> String {
         self.name.clone()
     }
-}
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct GenericCreditAccount {
-    name: String,
-}
+    fn class(&self) -> Class {
+        self.class
+    }
 
-impl GenericCreditAccount {
-    pub fn name(&self) -> String {
-        self.name.clone()
+    fn tags(&self) -> Vec<Tag> {
+        self.tags.clone()
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct CostOfSalesAccount {
-    name: String,
-    code: String,
-}
+pub struct AccountsPayable {}
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct AccountsReceivableAccount {
-    party: String,
-}
-
-impl AccountsReceivableAccount {
-    pub fn party(&self) -> String {
-        self.party.clone()
+impl AccountsPayable {
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct AccountsPayableAccount {
-    party: String,
-}
+impl Account for AccountsPayable {
+    fn name(&self) -> String {
+        String::from("Accounts Payable")
+    }
 
-impl AccountsPayableAccount {
-    pub fn party(&self) -> String {
-        self.party.clone()
+    fn class(&self) -> Class {
+        Liability
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct AccountsReceivable {}
+
+impl AccountsReceivable {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Account for AccountsReceivable {
+    fn name(&self) -> String {
+        String::from("Accounts Receivable")
+    }
+
+    fn class(&self) -> Class {
+        Asset
+    }
+}
+
 pub struct BankAccount {
     name: String,
-    account_number: String,
+    tags: Vec<Tag>,
+    acc_number: String,
 }
 
 impl BankAccount {
-    pub fn name(&self) -> String {
-        self.name.clone()
+    pub fn new(name: &str, acc_number: &str, tags: Vec<Tag>) -> Self {
+        Self {
+            name: name.to_owned(),
+            acc_number: acc_number.to_owned(),
+            tags,
+        }
+    }
+
+    pub fn acc_number(&self) -> String {
+        self.acc_number.clone()
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+impl Account for BankAccount {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    fn class(&self) -> Class {
+        Asset
+    }
+
+    fn tags(&self) -> Vec<Tag> {
+        self.tags.clone()
+    }
+}
+
 pub struct CreditCardAccount {
     name: String,
-    account_number: String,
+    tags: Vec<Tag>,
+    acc_number: String,
 }
 
 impl CreditCardAccount {
-    pub fn name(&self) -> String {
+    pub fn new(name: &str, acc_number: &str, tags: Vec<Tag>) -> Self {
+        Self {
+            name: name.to_owned(),
+            acc_number: acc_number.to_owned(),
+            tags,
+        }
+    }
+
+    pub fn acc_number(&self) -> String {
+        self.acc_number.clone()
+    }
+}
+
+impl Account for CreditCardAccount {
+    fn name(&self) -> String {
         self.name.clone()
+    }
+
+    fn class(&self) -> Class {
+        Liability
+    }
+
+    fn tags(&self) -> Vec<Tag> {
+        self.tags.clone()
     }
 }
 
@@ -198,33 +196,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn expenses() -> () {
-        let acc = Expenses(ExpensesAccount::Generic(GenericDebitAccount {
-            name: String::from("Shop Rent"),
-        }));
-        dbg!(&acc);
-        let is_expenses = match acc {
-            Expenses(_) => true,
-            _ => false,
-        };
-        assert_eq!(is_expenses, true);
-        let name = match acc {
-            Expenses(ExpensesAccount::Generic(GenericDebitAccount { name })) => name,
-            _ => String::from("Other"),
-        };
-        assert_eq!(name, String::from("Shop Rent"));
-    }
-
-    #[test]
-    fn accounts_recievable() -> () {
-        let acc = Assets(AccountsReceivable(AccountsReceivableAccount {
-            party: String::from("ACME Business Services"),
-        }));
-        dbg!(&acc);
-        let party = match acc {
-            Assets(AccountsReceivable(AccountsReceivableAccount { party })) => party,
-            _ => String::from("Other"),
-        };
-        assert_eq!(party, String::from("ACME Business Services"));
+    fn generic_expense_account() -> Result<()> {
+        let acc = GenericAccount::new(Expense, "Shop Rent", tags!["indirect"]?);
+        assert_eq!(acc.name(), String::from("Shop Rent"));
+        assert_eq!(acc.class(), Expense);
+        assert_eq!(acc.is_debit(), true);
+        assert_eq!(acc.is_credit(), false);
+        assert_eq!(acc.has_tag("Indirect"), true); // case insensative
+        Ok(())
     }
 }
