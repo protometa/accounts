@@ -124,3 +124,34 @@ async fn test_balance() -> Result<()> {
     ));
     Ok(())
 }
+
+#[async_std::test]
+async fn test_recurring() -> Result<()> {
+    let ledger = Ledger::new("./tests/fixtures/entries_recurring");
+
+    let journal_entry_strings: Vec<String> = ledger
+        .journal()
+        .await?
+        .map_ok(|journal_entry| journal_entry.to_string())
+        .try_collect()
+        .await?;
+
+    assert_eq!(dbg!(&journal_entry_strings).iter().count(), 12);
+    let display = journal_entry_strings.iter().join("\n");
+    assert_eq!(
+        display,
+        "| 3000-01-01 | Operating Expenses        |      $100.00 |              |\n\
+         | 3000-01-01 | Accounts Payable          |              |      $100.00 |\n\
+         | 3000-01-02 | Bank Account              |              |      $100.00 |\n\
+         | 3000-01-02 | Accounts Payable          |      $100.00 |              |\n\
+         | 3000-02-01 | Operating Expenses        |      $100.00 |              |\n\
+         | 3000-02-01 | Accounts Payable          |              |      $100.00 |\n\
+         | 3000-02-03 | Bank Account              |              |      $100.00 |\n\
+         | 3000-02-03 | Accounts Payable          |      $100.00 |              |\n\
+         | 3000-03-01 | Operating Expenses        |      $150.00 |              |\n\
+         | 3000-03-01 | Accounts Payable          |              |      $150.00 |\n\
+         | 3000-03-02 | Bank Account              |              |      $150.00 |\n\
+         | 3000-03-02 | Accounts Payable          |      $150.00 |              |"
+    );
+    Ok(())
+}
