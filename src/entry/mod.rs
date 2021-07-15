@@ -6,6 +6,7 @@ use chrono::naive::NaiveDate;
 use raw_entry::RawEntry;
 use rust_decimal::Decimal;
 use std::convert::{TryFrom, TryInto};
+use std::str::FromStr;
 
 /// This is a fully valid entry.
 #[derive(Debug)]
@@ -94,6 +95,8 @@ pub struct Invoice {
     pub items: Vec<InvoiceItem>,
     pub extras: Option<Vec<InvoiceExtra>>,
     pub payment: Option<InvoicePayment>,
+    pub repeat: Option<RecurringPeriod>,
+    pub end: Option<NaiveDate>,
 }
 
 impl Invoice {
@@ -181,6 +184,8 @@ impl TryFrom<RawEntry> for Invoice {
             items,
             extras,
             payment,
+            repeat,
+            end,
             ..
         } = raw_entry;
         let id = id.context("Id missing!")?;
@@ -200,6 +205,11 @@ impl TryFrom<RawEntry> for Invoice {
                     })
                 })
                 .transpose()?,
+            repeat: repeat.and_then(|period_string| match period_string.as_str() {
+                "monthly" => Some(RecurringPeriod::Monthly),
+                _ => None,
+            }),
+            end: end.map(|end| end.parse()).transpose()?,
         })
     }
 }
@@ -254,4 +264,9 @@ enum InvoiceExtraAmount {
 pub struct InvoicePayment {
     pub account: String,
     pub amount: Money,
+}
+
+#[derive(Debug, Clone)]
+pub enum RecurringPeriod {
+    Monthly, //TODO: add more periods
 }

@@ -13,6 +13,8 @@ pub struct RawEntry {
     pub items: Option<Vec<Item>>,
     pub extras: Option<Vec<Extra>>,
     pub payment: Option<Payment>,
+    pub repeat: Option<String>,
+    pub end: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
