@@ -84,7 +84,7 @@ impl Ledger {
             .entries()
             .await?
             .and_then(move |entry| {
-                let journal_entry = JournalEntry::from_entry(entry);
+                let journal_entry = JournalEntry::from_entry(entry, None);
                 async {
                     let stream = stream::iter(journal_entry?).map(|x| Ok(x));
                     Ok(stream)

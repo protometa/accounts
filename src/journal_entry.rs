@@ -2,7 +2,7 @@ use self::JournalAmount::*;
 use super::entry::{Entry, EntryBody};
 use super::money::Money;
 use anyhow::Result;
-use chrono::naive::NaiveDate;
+use chrono::prelude::*;
 use num_traits::Zero;
 use std::convert::TryFrom;
 use std::fmt;
@@ -55,8 +55,12 @@ impl AddAssign for JournalAmount {
 pub struct JournalEntry(pub NaiveDate, pub JournalAccount, pub JournalAmount);
 
 impl JournalEntry {
-    pub fn from_entry(entry: Entry) -> Result<Vec<Self>> {
+    pub fn from_entry(entry: Entry, until: Option<NaiveDate>) -> Result<Vec<Self>> {
         let date = entry.date();
+        let until = until.unwrap_or({
+            let today = Local::today();
+            NaiveDate::from_ymd(today.year(), today.month(), today.day())
+        });
         match entry.body() {
             EntryBody::PurchaseInvoice(invoice) => {
                 let mut entries = invoice

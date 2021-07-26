@@ -2,11 +2,11 @@ pub mod raw_entry;
 
 use super::money::Money;
 use anyhow::{Context, Error, Result};
-use chrono::naive::NaiveDate;
+use chrono::prelude::*;
 use raw_entry::RawEntry;
+use rrule::{Frequenzy, Options, RRule};
 use rust_decimal::Decimal;
 use std::convert::{TryFrom, TryInto};
-use std::str::FromStr;
 
 /// This is a fully valid entry.
 #[derive(Debug)]
@@ -95,8 +95,7 @@ pub struct Invoice {
     pub items: Vec<InvoiceItem>,
     pub extras: Option<Vec<InvoiceExtra>>,
     pub payment: Option<InvoicePayment>,
-    pub repeat: Option<RecurringPeriod>,
-    pub end: Option<NaiveDate>,
+    pub rrule: Option<RRule>,
 }
 
 impl Invoice {
@@ -173,6 +172,12 @@ impl Invoice {
     }
 }
 
+fn default_monthly_rrule(date: NaiveDate) -> rrule::Options {
+    Options::new()
+        .freq(Frequenzy::Monthly)
+        .bymonthday(vec![date.day().try_into().unwrap()]) // unwrap ok, always <= 31
+}
+
 impl TryFrom<RawEntry> for Invoice {
     type Error = Error;
 
@@ -186,9 +191,12 @@ impl TryFrom<RawEntry> for Invoice {
             payment,
             repeat,
             end,
+            date,
             ..
         } = raw_entry;
         let id = id.context("Id missing!")?;
+        let date: NaiveDate = date.parse()?;
+        let end: Option<DateTime<Utc>> = end.map(|s| s.parse()).transpose()?;
         Ok(Self {
             party,
             items: Self::items_try_from_raw_items(
@@ -205,11 +213,21 @@ impl TryFrom<RawEntry> for Invoice {
                     })
                 })
                 .transpose()?,
-            repeat: repeat.and_then(|period_string| match period_string.as_str() {
-                "monthly" => Some(RecurringPeriod::Monthly),
-                _ => None,
-            }),
-            end: end.map(|end| end.parse()).transpose()?,
+            // parse optional repeat string as optional rrule
+            // treating string 'monthly' as generic monthly rrule
+            rrule: repeat
+                .and_then(|rule_str| match rule_str.to_uppercase().as_str() {
+                    // if simply MONTHLY use basic monthy rrule
+                    "MONTHLY" => Some(
+                        end.map_or(default_monthly_rrule(date), |end| {
+                            default_monthly_rrule(date).until(end)
+                        })
+                        .build()
+                        .map(RRule::new),
+                    ),
+                    rule_str => Some(rule_str.parse()),
+                })
+                .transpose()?,
         })
     }
 }
@@ -264,9 +282,4 @@ enum InvoiceExtraAmount {
 pub struct InvoicePayment {
     pub account: String,
     pub amount: Money,
-}
-
-#[derive(Debug, Clone)]
-pub enum RecurringPeriod {
-    Monthly, //TODO: add more periods
 }
