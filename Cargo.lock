@@ -10,6 +10,7 @@ dependencies = [
  "async-std",
  "async-walkdir",
  "chrono",
+ "chrono-tz",
  "futures",
  "itertools",
  "num-traits",
@@ -680,9 +681,9 @@ checksum = "f497285884f3fcff424ffc933e56d7cbca511def0c9831a7f9b5f6153e3cc89b"
 
 [[package]]
 name = "rrule"
-version = "0.3.8"
+version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca45e540f0c9984d84272d8cd24f6f8af96aafd07c906ced5dfc878e5440cb11"
+checksum = "dcc01712126a4035bc720fd39da2bf99d57a127f55aa358d74692540ad31af0e"
 dependencies = [
  "chrono",
  "chrono-tz",

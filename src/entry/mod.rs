@@ -3,17 +3,41 @@ pub mod raw_entry;
 use super::money::Money;
 use anyhow::{Context, Error, Result};
 use chrono::prelude::*;
+use chrono_tz::UTC;
 use raw_entry::RawEntry;
 use rrule::{Frequenzy, Options, RRule};
 use rust_decimal::Decimal;
 use std::convert::{TryFrom, TryInto};
+use std::iter::{self, Iterator};
 
 /// This is a fully valid entry.
 #[derive(Debug)]
 pub struct Entry {
     id: String,
-    date: NaiveDate,
+    date: EntryDate,
     body: EntryBody,
+}
+
+#[derive(Debug)]
+enum EntryDate {
+    SingleDate(NaiveDate),
+    RRule(RRule),
+}
+
+impl EntryDate {
+    fn iter(&self) -> impl Iterator<Item = NaiveDate> + '_ {
+        let date = match self {
+            EntryDate::SingleDate(date) => Some(iter::once(date.clone())),
+            EntryDate::RRule(_) => None,
+        };
+        let rrule = match self {
+            EntryDate::SingleDate(_) => None,
+            EntryDate::RRule(rrule) => Some(rrule.into_iter().map(|d| d.date().naive_local())),
+        };
+        date.into_iter()
+            .flatten()
+            .chain(rrule.into_iter().flatten())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -28,8 +52,8 @@ impl Entry {
     pub fn id(&self) -> String {
         self.id.clone()
     }
-    pub fn date(&self) -> NaiveDate {
-        self.date.clone()
+    pub fn dates(&self, until: NaiveDate) -> impl Iterator<Item = NaiveDate> + '_ {
+        self.date.iter().take_while(move |d| *d <= until)
     }
     pub fn body(&self) -> EntryBody {
         self.body.clone()
@@ -40,18 +64,45 @@ impl TryFrom<RawEntry> for Entry {
     type Error = Error;
 
     fn try_from(raw_entry: RawEntry) -> Result<Self> {
+        let RawEntry {
+            id,
+            date,
+            r#type,
+            repeat,
+            end,
+            ..
+        } = raw_entry.clone();
+        let date: NaiveDate = date.parse()?;
+        let end: Option<NaiveDate> = end.map(|s| s.parse()).transpose()?;
         Ok(Entry {
-            id: raw_entry.id.clone().context("Id missing!")?,
-            date: raw_entry.date.parse()?,
-            body: match raw_entry.r#type.as_ref() {
+            id: id.clone().context("Id missing!")?,
+            // `date` is single date unless `repeat` is specified then becomes rrule
+            // rrule is parsed from optional `repeat` and `end` fields
+            // treating string 'monthly' as generic monthly rrule
+            date: repeat.map_or::<Result<_>, _>(Ok(EntryDate::SingleDate(date)), |rule_str| {
+                let ed = match rule_str.to_uppercase().as_str() {
+                    // if simply MONTHLY use basic monthy rrule
+                    "MONTHLY" => end
+                        .map_or(default_monthly_rrule(date), |end| {
+                            default_monthly_rrule(date).until(
+                                Local
+                                    .ymd(end.year(), end.month(), end.day())
+                                    .and_hms(0, 0, 0)
+                                    .with_timezone(&Utc),
+                            )
+                        })
+                        .build()
+                        .map(RRule::new)?,
+                    rule_str => rule_str.parse()?,
+                };
+                Ok(EntryDate::RRule(ed))
+            })?,
+            body: match r#type.as_ref() {
                 "Payment Sent" => Ok(EntryBody::PaymentSent(raw_entry.try_into()?)),
                 "Payment Received" => Ok(EntryBody::PaymentReceived(raw_entry.try_into()?)),
                 "Purchase Invoice" => Ok(EntryBody::PurchaseInvoice(raw_entry.try_into()?)),
                 "Sales Invoice" => Ok(EntryBody::SaleInvoice(raw_entry.try_into()?)),
-                _ => Err(Error::msg(format!(
-                    "{} not a valid entry type",
-                    raw_entry.r#type
-                ))),
+                _ => Err(Error::msg(format!("{} not a valid entry type", r#type))),
             }?,
         })
     }
@@ -95,7 +146,6 @@ pub struct Invoice {
     pub items: Vec<InvoiceItem>,
     pub extras: Option<Vec<InvoiceExtra>>,
     pub payment: Option<InvoicePayment>,
-    pub rrule: Option<RRule>,
 }
 
 impl Invoice {
@@ -174,6 +224,12 @@ impl Invoice {
 
 fn default_monthly_rrule(date: NaiveDate) -> rrule::Options {
     Options::new()
+        .dtstart(
+            Local
+                .ymd(date.year(), date.month(), date.day())
+                .and_hms(0, 0, 0)
+                .with_timezone(&UTC),
+        )
         .freq(Frequenzy::Monthly)
         .bymonthday(vec![date.day().try_into().unwrap()]) // unwrap ok, always <= 31
 }
@@ -189,14 +245,9 @@ impl TryFrom<RawEntry> for Invoice {
             items,
             extras,
             payment,
-            repeat,
-            end,
-            date,
             ..
         } = raw_entry;
         let id = id.context("Id missing!")?;
-        let date: NaiveDate = date.parse()?;
-        let end: Option<DateTime<Utc>> = end.map(|s| s.parse()).transpose()?;
         Ok(Self {
             party,
             items: Self::items_try_from_raw_items(
@@ -211,21 +262,6 @@ impl TryFrom<RawEntry> for Invoice {
                         account: payment.account,
                         amount: payment.amount.try_into()?,
                     })
-                })
-                .transpose()?,
-            // parse optional repeat string as optional rrule
-            // treating string 'monthly' as generic monthly rrule
-            rrule: repeat
-                .and_then(|rule_str| match rule_str.to_uppercase().as_str() {
-                    // if simply MONTHLY use basic monthy rrule
-                    "MONTHLY" => Some(
-                        end.map_or(default_monthly_rrule(date), |end| {
-                            default_monthly_rrule(date).until(end)
-                        })
-                        .build()
-                        .map(RRule::new),
-                    ),
-                    rule_str => Some(rule_str.parse()),
                 })
                 .transpose()?,
         })

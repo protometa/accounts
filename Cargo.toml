@@ -14,7 +14,8 @@ chrono = "0.4.19"
 rust_decimal = "1.10.1"
 async-walkdir = "0.2.0"
 num-traits = "0.2.14"
-rrule = "0.3.8"
+rrule = "0.5.9"
+chrono-tz = "0.5.3"
 
 [dev-dependencies]
 itertools = "0.10.0"
