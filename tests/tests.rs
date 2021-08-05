@@ -49,22 +49,22 @@ async fn test_journal_from_entries() -> Result<()> {
     let display = journal_entry_strings.iter().join("\n");
     assert_eq!(
         display,
-        "| 3000-01-01 | Operating Expenses        |      $100.00 |              |\n\
-         | 3000-01-01 | Accounts Payable          |              |      $100.00 |\n\
-         | 3000-01-02 | Credit Card               |              |      $100.00 |\n\
-         | 3000-01-02 | Accounts Payable          |      $100.00 |              |\n\
-         | 3000-01-03 | Operating Expenses        |       $50.00 |              |\n\
-         | 3000-01-03 | Business Checking         |              |       $50.00 |\n\
-         | 3000-01-04 | Operating Expenses        |      $100.00 |              |\n\
-         | 3000-01-04 | Accounts Payable          |              |      $100.00 |\n\
-         | 3000-01-05 | Widget Sales              |              |       $10.00 |\n\
-         | 3000-01-05 | Accounts Receivable       |       $10.00 |              |\n\
-         | 3000-01-06 | Business Checking         |       $10.00 |              |\n\
-         | 3000-01-06 | Accounts Receivable       |              |       $10.00 |\n\
-         | 3000-01-07 | Widget Sales              |              |        $5.00 |\n\
-         | 3000-01-07 | Business Checking         |        $5.00 |              |\n\
-         | 3000-01-08 | Widget Sales              |              |       $10.00 |\n\
-         | 3000-01-08 | Accounts Receivable       |       $10.00 |              |"
+        "| 2020-01-01 | Operating Expenses        |      $100.00 |              |\n\
+         | 2020-01-01 | Accounts Payable          |              |      $100.00 |\n\
+         | 2020-01-02 | Credit Card               |              |      $100.00 |\n\
+         | 2020-01-02 | Accounts Payable          |      $100.00 |              |\n\
+         | 2020-01-03 | Operating Expenses        |       $50.00 |              |\n\
+         | 2020-01-03 | Business Checking         |              |       $50.00 |\n\
+         | 2020-01-04 | Operating Expenses        |      $100.00 |              |\n\
+         | 2020-01-04 | Accounts Payable          |              |      $100.00 |\n\
+         | 2020-01-05 | Widget Sales              |              |       $10.00 |\n\
+         | 2020-01-05 | Accounts Receivable       |       $10.00 |              |\n\
+         | 2020-01-06 | Business Checking         |       $10.00 |              |\n\
+         | 2020-01-06 | Accounts Receivable       |              |       $10.00 |\n\
+         | 2020-01-07 | Widget Sales              |              |        $5.00 |\n\
+         | 2020-01-07 | Business Checking         |        $5.00 |              |\n\
+         | 2020-01-08 | Widget Sales              |              |       $10.00 |\n\
+         | 2020-01-08 | Accounts Receivable       |       $10.00 |              |"
     );
     Ok(())
 }
@@ -129,29 +129,32 @@ async fn test_balance() -> Result<()> {
 async fn test_recurring() -> Result<()> {
     let ledger = Ledger::new("./tests/fixtures/entries_recurring");
 
-    let journal_entry_strings: Vec<String> = ledger
-        .journal()
-        .await?
-        .map_ok(|journal_entry| journal_entry.to_string())
-        .try_collect()
-        .await?;
+    let mut journal_entries: Vec<journal_entry::JournalEntry> =
+        ledger.journal().await?.try_collect().await?;
+
+    journal_entries.sort_by_key(|journal_entry| journal_entry.0);
+
+    let journal_entry_strings: Vec<String> = journal_entries
+        .into_iter()
+        .map(|journal_entry| journal_entry.to_string())
+        .collect();
 
     assert_eq!(dbg!(&journal_entry_strings).iter().count(), 12);
     let display = journal_entry_strings.iter().join("\n");
     assert_eq!(
         display,
-        "| 3000-01-01 | Operating Expenses        |      $100.00 |              |\n\
-         | 3000-01-01 | Accounts Payable          |              |      $100.00 |\n\
-         | 3000-01-02 | Bank Account              |              |      $100.00 |\n\
-         | 3000-01-02 | Accounts Payable          |      $100.00 |              |\n\
-         | 3000-02-01 | Operating Expenses        |      $100.00 |              |\n\
-         | 3000-02-01 | Accounts Payable          |              |      $100.00 |\n\
-         | 3000-02-03 | Bank Account              |              |      $100.00 |\n\
-         | 3000-02-03 | Accounts Payable          |      $100.00 |              |\n\
-         | 3000-03-01 | Operating Expenses        |      $150.00 |              |\n\
-         | 3000-03-01 | Accounts Payable          |              |      $150.00 |\n\
-         | 3000-03-02 | Bank Account              |              |      $150.00 |\n\
-         | 3000-03-02 | Accounts Payable          |      $150.00 |              |"
+        "| 2020-01-01 | Operating Expenses        |      $100.00 |              |\n\
+         | 2020-01-01 | Accounts Payable          |              |      $100.00 |\n\
+         | 2020-01-02 | Bank Account              |              |      $100.00 |\n\
+         | 2020-01-02 | Accounts Payable          |      $100.00 |              |\n\
+         | 2020-02-01 | Operating Expenses        |      $100.00 |              |\n\
+         | 2020-02-01 | Accounts Payable          |              |      $100.00 |\n\
+         | 2020-02-03 | Bank Account              |              |      $100.00 |\n\
+         | 2020-02-03 | Accounts Payable          |      $100.00 |              |\n\
+         | 2020-03-01 | Operating Expenses        |      $150.00 |              |\n\
+         | 2020-03-01 | Accounts Payable          |              |      $150.00 |\n\
+         | 2020-03-02 | Bank Account              |              |      $150.00 |\n\
+         | 2020-03-02 | Accounts Payable          |      $150.00 |              |"
     );
     Ok(())
 }

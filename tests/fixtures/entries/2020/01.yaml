@@ -1,7 +1,7 @@
 ---
 # purchase invoice with payment later
 type: Purchase Invoice
-date: 3000-01-01
+date: 2020-01-01
 party: ACME Business Services
 account: Operating Expenses
 items:
@@ -9,7 +9,7 @@ items:
     amount: 100
 ---
 type: Payment Sent
-date: 3000-01-02
+date: 2020-01-02
 party: ACME Business Services 
 memo: Business Services
 account: Credit Card
@@ -17,7 +17,7 @@ amount: 100
 ---
 # purchase invoice with attached payment
 type: Purchase Invoice
-date: 3000-01-03
+date: 2020-01-03
 party: ACME Business Services
 account: Operating Expenses
 items:
@@ -29,7 +29,7 @@ payment:
 ---
 # purchase invoice without payment
 type: Purchase Invoice
-date: 3000-01-04
+date: 2020-01-04
 party: ACME Business Services
 account: Operating Expenses
 items:
@@ -38,7 +38,7 @@ items:
 ---
 # sales invoice with payment later
 type: Sales Invoice
-date: 3000-01-05
+date: 2020-01-05
 party: John Smith
 account: Widget Sales
 items:
@@ -46,7 +46,7 @@ items:
     amount: 10
 ---
 type: Payment Received
-date: 3000-01-06
+date: 2020-01-06
 party: John Smith
 memo: Widget
 account: Business Checking
@@ -54,7 +54,7 @@ amount: 10
 ---
 # sales invoice with attached payment
 type: Sales Invoice
-date: 3000-01-07
+date: 2020-01-07
 party: John Smith
 account: Widget Sales
 items:
@@ -66,7 +66,7 @@ payment:
 ---
 # sales invoice without payment
 type: Sales Invoice
-date: 3000-01-08
+date: 2020-01-08
 party: John Smith
 account: Widget Sales
 items:

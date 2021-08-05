@@ -1,5 +1,5 @@
 type: Purchase Invoice
-date: 3000-01-01
+date: 2020-01-01
 party: ACME Business Services
 account: Operating Expenses
 items:

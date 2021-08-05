@@ -1,16 +1,18 @@
 ---
 # purchase invoice with payment later
 type: Purchase Invoice
-date: 3000-03-01
+date: 2020-01-01
 party: ACME Business Services
 account: Operating Expenses
 items:
   - description: Business Services
-    amount: 150
+    amount: 100
+repeat: monthly
+end: 2020-02-01
 ---
 type: Payment Sent
-date: 3000-03-02
+date: 2020-01-02
 party: ACME Business Services
 memo: Business Services
 account: Bank Account
-amount: 150
+amount: 100
