@@ -56,86 +56,101 @@ pub struct JournalEntry(pub NaiveDate, pub JournalAccount, pub JournalAmount);
 
 impl JournalEntry {
     pub fn from_entry(entry: Entry, until: Option<NaiveDate>) -> Result<Vec<Self>> {
-        let date = entry.date();
         let until = until.unwrap_or({
             let today = Local::today();
             NaiveDate::from_ymd(today.year(), today.month(), today.day())
         });
-        match entry.body() {
-            EntryBody::PurchaseInvoice(invoice) => {
-                let mut entries = invoice
-                    .items
-                    .iter()
-                    .map(|item| {
-                        Ok(JournalEntry(
+        Ok(entry
+            .dates(until)
+            .map(|date| {
+                match entry.body() {
+                    EntryBody::PurchaseInvoice(invoice) => {
+                        let mut entries = invoice
+                            .items
+                            .iter()
+                            .map(|item| {
+                                Ok(JournalEntry(
+                                    date,
+                                    item.account.clone(),
+                                    Debit(item.total()?),
+                                ))
+                            })
+                            .collect::<Result<Vec<Self>>>()?; // TODO include inventory entries if tracking
+                        let credit_amount =
+                            Credit(invoice.items.iter().fold(
+                                Money::try_from(0.0),
+                                |acc, item| Ok(acc? + item.total()?),
+                            )?);
+                        let credit_entry = match invoice.payment {
+                            None => {
+                                JournalEntry(date, String::from("Accounts Payable"), credit_amount)
+                            }
+                            Some(payment) => {
+                                JournalEntry(date, payment.account.clone(), credit_amount)
+                            }
+                        };
+                        entries.push(credit_entry);
+                        Ok(entries)
+                    }
+
+                    EntryBody::PaymentSent(payment) => Ok(vec![
+                        JournalEntry(
                             date,
-                            item.account.clone(),
-                            Debit(item.total()?),
-                        ))
-                    })
-                    .collect::<Result<Vec<Self>>>()?; // TODO include inventory entries if tracking
-                let credit_amount = Credit(
-                    invoice
-                        .items
-                        .iter()
-                        .fold(Money::try_from(0.0), |acc, item| Ok(acc? + item.total()?))?,
-                );
-                let credit_entry = match invoice.payment {
-                    None => JournalEntry(date, String::from("Accounts Payable"), credit_amount),
-                    Some(payment) => JournalEntry(date, payment.account.clone(), credit_amount),
-                };
-                entries.push(credit_entry);
-                Ok(entries)
-            }
-
-            EntryBody::PaymentSent(payment) => Ok(vec![
-                JournalEntry(
-                    date,
-                    payment.account.clone(),
-                    Credit(payment.amount.clone()),
-                ),
-                JournalEntry(
-                    date,
-                    String::from("Accounts Payable"),
-                    Debit(payment.amount.clone()),
-                ),
-            ]),
-
-            EntryBody::SaleInvoice(invoice) => {
-                let mut entries = invoice
-                    .items
-                    .iter()
-                    .map(|item| {
-                        Ok(JournalEntry(
+                            payment.account.clone(),
+                            Credit(payment.amount.clone()),
+                        ),
+                        JournalEntry(
                             date,
-                            item.account.clone(),
-                            Credit(item.total()?),
-                        ))
-                    })
-                    .collect::<Result<Vec<Self>>>()?; // TODO include inventory entries if tracking
-                let debit_amount = Debit(
-                    invoice
-                        .items
-                        .iter()
-                        .fold(Money::try_from(0.0), |acc, item| Ok(acc? + item.total()?))?,
-                );
-                let debit_entry = match invoice.payment {
-                    None => JournalEntry(date, String::from("Accounts Receivable"), debit_amount),
-                    Some(payment) => JournalEntry(date, payment.account.clone(), debit_amount),
-                };
-                entries.push(debit_entry);
-                Ok(entries)
-            }
+                            String::from("Accounts Payable"),
+                            Debit(payment.amount.clone()),
+                        ),
+                    ]),
 
-            EntryBody::PaymentReceived(payment) => Ok(vec![
-                JournalEntry(date, payment.account.clone(), Debit(payment.amount.clone())),
-                JournalEntry(
-                    date,
-                    String::from("Accounts Receivable"),
-                    Credit(payment.amount.clone()),
-                ),
-            ]),
-        }
+                    EntryBody::SaleInvoice(invoice) => {
+                        let mut entries = invoice
+                            .items
+                            .iter()
+                            .map(|item| {
+                                Ok(JournalEntry(
+                                    date,
+                                    item.account.clone(),
+                                    Credit(item.total()?),
+                                ))
+                            })
+                            .collect::<Result<Vec<Self>>>()?; // TODO include inventory entries if tracking
+                        let debit_amount =
+                            Debit(invoice.items.iter().fold(
+                                Money::try_from(0.0),
+                                |acc, item| Ok(acc? + item.total()?),
+                            )?);
+                        let debit_entry = match invoice.payment {
+                            None => JournalEntry(
+                                date,
+                                String::from("Accounts Receivable"),
+                                debit_amount,
+                            ),
+                            Some(payment) => {
+                                JournalEntry(date, payment.account.clone(), debit_amount)
+                            }
+                        };
+                        entries.push(debit_entry);
+                        Ok(entries)
+                    }
+
+                    EntryBody::PaymentReceived(payment) => Ok(vec![
+                        JournalEntry(date, payment.account.clone(), Debit(payment.amount.clone())),
+                        JournalEntry(
+                            date,
+                            String::from("Accounts Receivable"),
+                            Credit(payment.amount.clone()),
+                        ),
+                    ]),
+                }
+            })
+            .collect::<Result<Vec<Vec<Self>>>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<Self>>())
     }
 }
 
