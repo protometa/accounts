@@ -1,6 +1,8 @@
 // use accounts;
+use accounts::*;
 use anyhow::Result;
 use clap::{App, Arg};
+use futures::stream::TryStreamExt;
 
 #[async_std::main]
 async fn main() -> Result<()> {
@@ -45,10 +47,27 @@ async fn main() -> Result<()> {
         .get_matches();
 
     if let Some(entries) = matches.value_of("entries") {
+        let ledger = if entries == "-" {
+            Ledger::new(None)
+        } else {
+            Ledger::new(Some(entries))
+        };
         if matches.subcommand_matches("journal").is_some() {
-            println!("Show journal for entries at {}", entries);
+            ledger
+                .journal()
+                .try_for_each(|entry| async move {
+                    println!("{}", entry);
+                    Ok(())
+                })
+                .await?;
         } else if matches.subcommand_matches("balances").is_some() {
-            println!("Show balances for entries at {}", entries);
+            ledger
+                .balances()
+                .await?
+                .iter()
+                .for_each(|(account, amount)| {
+                    println!("| {:25} | {} |", account, amount);
+                });
         } else if let Some(report) = matches.subcommand_matches("report") {
             if let (Some(spec), Some(chart)) = (
                 report.value_of("report spec"),
