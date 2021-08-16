@@ -5,7 +5,7 @@ authors = ["Luke Nimtz <luke.nimtz@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-async-std = {version = "1.8.0", features = ["attributes", "unstable"]}
+async-std = {version = "1.9.0", features = ["attributes", "unstable"]}
 futures = "0.3.8"
 serde = { version = "1.0.118", features = ["derive"] }
 serde_yaml = "0.8.14"
@@ -17,6 +17,7 @@ num-traits = "0.2.14"
 rrule = "0.5.9"
 chrono-tz = "0.5.3"
 clap = "3.0.0-beta.2"
+lines-ext = { git = "https://github.com/protometa/lines-ext" }
 
 [dev-dependencies]
 itertools = "0.10.0"

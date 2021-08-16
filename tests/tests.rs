@@ -6,8 +6,8 @@ use itertools::Itertools;
 
 #[async_std::test]
 async fn test_basic_entries() -> Result<()> {
-    let ledger = Ledger::new("./tests/fixtures/entries_flat");
-    let entries = ledger.entries().await?.try_collect::<Vec<Entry>>().await?;
+    let ledger = Ledger::new(Some("./tests/fixtures/entries_flat"));
+    let entries = ledger.entries().try_collect::<Vec<Entry>>().await?;
     dbg!(&entries);
     let count = entries.iter().map(|entry| entry.id()).unique().count();
     assert_eq!(count, 2);
@@ -16,8 +16,8 @@ async fn test_basic_entries() -> Result<()> {
 
 #[async_std::test]
 async fn test_nested_dirs() -> Result<()> {
-    let ledger = Ledger::new("./tests/fixtures/entries_nested_dirs");
-    let entries = ledger.entries().await?.try_collect::<Vec<Entry>>().await?;
+    let ledger = Ledger::new(Some("./tests/fixtures/entries_nested_dirs"));
+    let entries = ledger.entries().try_collect::<Vec<Entry>>().await?;
     dbg!(&entries);
     let count = entries.iter().map(|entry| entry.id()).unique().count();
     assert_eq!(count, 2);
@@ -26,8 +26,10 @@ async fn test_nested_dirs() -> Result<()> {
 
 #[async_std::test]
 async fn test_multiple_entries_in_one_file() -> Result<()> {
-    let ledger = Ledger::new("./tests/fixtures/entries_multiple_entries_in_one_file");
-    let entries = ledger.entries().await?.try_collect::<Vec<Entry>>().await?;
+    let ledger = Ledger::new(Some(
+        "./tests/fixtures/entries_multiple_entries_in_one_file",
+    ));
+    let entries = ledger.entries().try_collect::<Vec<Entry>>().await?;
     dbg!(&entries);
     let count = entries.iter().map(|entry| entry.id()).unique().count();
     assert_eq!(count, 2);
@@ -36,11 +38,10 @@ async fn test_multiple_entries_in_one_file() -> Result<()> {
 
 #[async_std::test]
 async fn test_journal_from_entries() -> Result<()> {
-    let ledger = Ledger::new("./tests/fixtures/entries");
+    let ledger = Ledger::new(Some("./tests/fixtures/entries"));
 
     let journal_entry_strings: Vec<String> = ledger
         .journal()
-        .await?
         .map_ok(|journal_entry| journal_entry.to_string())
         .try_collect()
         .await?;
@@ -84,7 +85,7 @@ fn contains_balance(
 
 #[async_std::test]
 async fn test_balance() -> Result<()> {
-    let ledger = Ledger::new("./tests/fixtures/entries");
+    let ledger = Ledger::new(Some("./tests/fixtures/entries"));
     let balances = ledger.balances().await?;
     let balances_strings: Vec<(String, String)> = balances
         .iter()
@@ -127,10 +128,10 @@ async fn test_balance() -> Result<()> {
 
 #[async_std::test]
 async fn test_recurring() -> Result<()> {
-    let ledger = Ledger::new("./tests/fixtures/entries_recurring");
+    let ledger = Ledger::new(Some("./tests/fixtures/entries_recurring"));
 
     let mut journal_entries: Vec<journal_entry::JournalEntry> =
-        ledger.journal().await?.try_collect().await?;
+        ledger.journal().try_collect().await?;
 
     journal_entries.sort_by_key(|journal_entry| journal_entry.0);
 
