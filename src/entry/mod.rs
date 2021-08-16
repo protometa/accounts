@@ -25,18 +25,11 @@ enum EntryDate {
 }
 
 impl EntryDate {
-    fn iter(&self) -> impl Iterator<Item = NaiveDate> + '_ {
-        let date = match self {
-            EntryDate::SingleDate(date) => Some(iter::once(date.clone())),
-            EntryDate::RRule(_) => None,
-        };
-        let rrule = match self {
-            EntryDate::SingleDate(_) => None,
-            EntryDate::RRule(rrule) => Some(rrule.into_iter().map(|d| d.date().naive_local())),
-        };
-        date.into_iter()
-            .flatten()
-            .chain(rrule.into_iter().flatten())
+    fn iter(&self) -> Box<dyn Iterator<Item = NaiveDate> + '_> {
+        match self {
+            EntryDate::SingleDate(date) => Box::new(iter::once(date.clone())),
+            EntryDate::RRule(rrule) => Box::new(rrule.into_iter().map(|d| d.date().naive_local())),
+        }
     }
 }
 
