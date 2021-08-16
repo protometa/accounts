@@ -12,7 +12,7 @@ use async_walkdir::{DirEntry, WalkDir};
 use chart_of_accounts::ChartOfAccounts;
 use entry::raw_entry::RawEntry;
 use entry::Entry;
-use futures::stream::{self, StreamExt, TryStream, TryStreamExt};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use journal_entry::{JournalAccount, JournalAmount, JournalEntry};
 use lines_ext::LinesExt;
 use std::borrow::ToOwned;
@@ -34,9 +34,7 @@ impl Ledger {
         }
     }
 
-    fn dir_lines(
-        dir: String,
-    ) -> impl TryStream<Item = std::io::Result<String>, Error = std::io::Error, Ok = String> {
+    fn dir_lines(dir: String) -> impl Stream<Item = std::io::Result<String>> {
         WalkDir::new(dir)
             .try_filter_map(|dir_entry: DirEntry| async move {
                 let path = dir_entry.path();
@@ -53,10 +51,7 @@ impl Ledger {
             .try_flatten()
     }
 
-    fn lines(
-        &self,
-    ) -> impl TryStream<Item = std::io::Result<String>, Error = std::io::Error, Ok = String> + '_
-    {
+    fn lines(&self) -> impl Stream<Item = std::io::Result<String>> + '_ {
         if let Some(dir) = self.dir.clone() {
             Self::dir_lines(dir.clone()).left_stream()
         } else {
@@ -64,13 +59,13 @@ impl Ledger {
         }
     }
 
-    pub fn entries(&self) -> impl TryStream<Item = Result<Entry>, Error = Error, Ok = Entry> + '_ {
+    pub fn entries(&self) -> impl Stream<Item = Result<Entry>> + '_ {
         self.lines()
             .chunk_by_line("---")
-            .map_err(|err: std::io::Error| Error::new(err)) // map to anyhow::Error from here on
+            .map_err(Error::new) // map to anyhow::Error from here on
             .and_then(|doc: String| async move {
                 let mut raw_entry: RawEntry = serde_yaml::from_str(doc.as_str())
-                    .context(format!("Failed to deserialize entry:\n{:?}", doc))?;
+                    .context(format!("Failed to deserialize entry:\n{}", doc))?;
                 raw_entry.id.get_or_insert(format!(
                     "{}-{}-{}-{}",
                     raw_entry.date, raw_entry.r#type, raw_entry.party, raw_entry.account
@@ -80,7 +75,7 @@ impl Ledger {
             })
     }
 
-    pub fn journal(&self) -> impl TryStream<Ok = JournalEntry, Error = Error> + '_ {
+    pub fn journal(&self) -> impl Stream<Item = Result<JournalEntry>> + '_ {
         self.entries()
             .and_then(move |entry| {
                 let journal_entry = JournalEntry::from_entry(entry, None);
