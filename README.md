@@ -1,4 +1,4 @@
 
 # Accounts
 
-File-based accounting tools.
+Accounting tools.
