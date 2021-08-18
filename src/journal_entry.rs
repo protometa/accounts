@@ -10,7 +10,7 @@ use std::ops::AddAssign;
 
 pub type JournalAccount = String;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum JournalAmount {
     Debit(Money),
     Credit(Money),
@@ -51,7 +51,7 @@ impl AddAssign for JournalAmount {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct JournalEntry(pub NaiveDate, pub JournalAccount, pub JournalAmount);
 
 impl JournalEntry {
