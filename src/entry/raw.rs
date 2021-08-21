@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Raw struct deserilized from yaml
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct RawEntry {
+pub struct Entry {
     pub id: Option<String>, // if not specified will use filename
     pub r#type: String,
     pub date: String,

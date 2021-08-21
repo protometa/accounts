@@ -1,3 +1,4 @@
+#![allow(clippy::new_without_default)]
 use super::account::*;
 
 pub type AccountId = usize;

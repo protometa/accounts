@@ -1,14 +1,14 @@
-pub mod raw_entry;
+mod raw;
 
 use super::money::Money;
-use anyhow::{Context, Error, Result};
+use anyhow::{bail, Context, Error, Result};
 use chrono::prelude::*;
 use chrono_tz::UTC;
-use raw_entry::RawEntry;
 use rrule::{Frequenzy, Options, RRule};
 use rust_decimal::Decimal;
 use std::convert::{TryFrom, TryInto};
 use std::iter::{self, Iterator};
+use std::str::FromStr;
 
 /// This is a fully valid entry.
 #[derive(Debug)]
@@ -21,13 +21,13 @@ pub struct Entry {
 #[derive(Debug)]
 enum EntryDate {
     SingleDate(NaiveDate),
-    RRule(RRule),
+    RRule(Box<RRule>),
 }
 
 impl EntryDate {
     fn iter(&self) -> Box<dyn Iterator<Item = NaiveDate> + '_> {
         match self {
-            EntryDate::SingleDate(date) => Box::new(iter::once(date.clone())),
+            EntryDate::SingleDate(date) => Box::new(iter::once(*date)),
             EntryDate::RRule(rrule) => Box::new(rrule.into_iter().map(|d| d.date().naive_local())),
         }
     }
@@ -53,51 +53,69 @@ impl Entry {
     }
 }
 
-impl TryFrom<RawEntry> for Entry {
+impl TryFrom<raw::Entry> for Entry {
     type Error = Error;
 
-    fn try_from(raw_entry: RawEntry) -> Result<Self> {
-        let RawEntry {
-            id,
-            date,
-            r#type,
-            repeat,
-            end,
-            ..
-        } = raw_entry.clone();
-        let date: NaiveDate = date.parse()?;
-        let end: Option<NaiveDate> = end.map(|s| s.parse()).transpose()?;
+    fn try_from(raw_entry: raw::Entry) -> Result<Self> {
+        let date: NaiveDate = raw_entry.date.parse()?;
+        let end: Option<NaiveDate> = raw_entry.end.clone().map(|s| s.parse()).transpose()?;
         Ok(Entry {
-            id: id.clone().context("Id missing!")?,
+            id: raw_entry.id.clone().context("Id missing!")?,
             // `date` is single date unless `repeat` is specified then becomes rrule
             // rrule is parsed from optional `repeat` and `end` fields
             // treating string 'monthly' as generic monthly rrule
-            date: repeat.map_or::<Result<_>, _>(Ok(EntryDate::SingleDate(date)), |rule_str| {
-                let ed = match rule_str.to_uppercase().as_str() {
-                    // if simply MONTHLY use basic monthy rrule
-                    "MONTHLY" => end
-                        .map_or(default_monthly_rrule(date), |end| {
-                            default_monthly_rrule(date).until(
-                                Local
-                                    .ymd(end.year(), end.month(), end.day())
-                                    .and_hms(0, 0, 0)
-                                    .with_timezone(&Utc),
-                            )
-                        })
-                        .build()
-                        .map(RRule::new)?,
-                    rule_str => rule_str.parse()?,
-                };
-                Ok(EntryDate::RRule(ed))
-            })?,
-            body: match r#type.as_ref() {
+            date: raw_entry.repeat.clone().map_or::<Result<_>, _>(
+                Ok(EntryDate::SingleDate(date)),
+                |rule_str| {
+                    let ed = match rule_str.to_uppercase().as_str() {
+                        // if simply MONTHLY use basic monthy rrule
+                        "MONTHLY" => end
+                            .map_or(default_monthly_rrule(date), |end| {
+                                default_monthly_rrule(date).until(
+                                    Local
+                                        .ymd(end.year(), end.month(), end.day())
+                                        .and_hms(0, 0, 0)
+                                        .with_timezone(&Utc),
+                                )
+                            })
+                            .build()
+                            .map(RRule::new)?,
+                        rule_str => rule_str.parse()?,
+                    };
+                    Ok(EntryDate::RRule(Box::new(ed)))
+                },
+            )?,
+            body: match raw_entry.r#type.as_ref() {
                 "Payment Sent" => Ok(EntryBody::PaymentSent(raw_entry.try_into()?)),
                 "Payment Received" => Ok(EntryBody::PaymentReceived(raw_entry.try_into()?)),
                 "Purchase Invoice" => Ok(EntryBody::PurchaseInvoice(raw_entry.try_into()?)),
                 "Sales Invoice" => Ok(EntryBody::SaleInvoice(raw_entry.try_into()?)),
-                _ => Err(Error::msg(format!("{} not a valid entry type", r#type))),
+                _ => Err(Error::msg(format!(
+                    "{} not a valid Entry type",
+                    raw_entry.r#type
+                ))),
             }?,
         })
+    }
+}
+
+impl FromStr for Entry {
+    type Err = Error;
+    fn from_str(doc: &str) -> Result<Self> {
+        let mut raw_entry: raw::Entry = serde_yaml::from_str(doc)
+            .with_context(|| format!("Failed to deserialize Entry:\n{}", doc))?;
+        let id = format!(
+            "{}|{}|{}|{}",
+            raw_entry.date,
+            raw_entry.r#type,
+            raw_entry.party,
+            raw_entry.account // TODO some random uid part
+        );
+        raw_entry.id.get_or_insert(id.clone());
+        let entry: Entry = raw_entry
+            .try_into()
+            .with_context(|| format!("Failed to convert Entry: {}", id))?;
+        Ok(entry)
     }
 }
 
@@ -109,25 +127,24 @@ pub struct Payment {
     pub amount: Money,
 }
 
-impl TryFrom<RawEntry> for Payment {
+impl TryFrom<raw::Entry> for Payment {
     type Error = Error;
 
-    fn try_from(raw_entry: RawEntry) -> Result<Self> {
-        let RawEntry {
-            id,
+    fn try_from(
+        raw::Entry {
             party,
             account,
             memo,
             amount,
             ..
-        } = raw_entry;
-
+        }: raw::Entry,
+    ) -> Result<Self> {
         Ok(Self {
             party,
             account,
             memo,
             amount: amount
-                .context(format!("Amount required for payment entry in {:?}", id))?
+                .context("Amount required for Payment Entry")?
                 .try_into()?,
         })
     }
@@ -139,80 +156,6 @@ pub struct Invoice {
     pub items: Vec<InvoiceItem>,
     pub extras: Option<Vec<InvoiceExtra>>,
     pub payment: Option<InvoicePayment>,
-}
-
-impl Invoice {
-    fn items_try_from_raw_items(
-        raw_items: Vec<raw_entry::Item>,
-        entry_account: String,
-        id: String,
-    ) -> Result<Vec<InvoiceItem>> {
-        raw_items
-            .into_iter()
-            .map(|raw_item: raw_entry::Item| {
-                let raw_entry::Item {
-                    description,
-                    code,
-                    account,
-                    amount,
-                    quantity,
-                    rate,
-                } = raw_item;
-                Ok(InvoiceItem {
-                    description,
-                    code,
-                    account: account.unwrap_or(entry_account.clone()),
-                    amount: match (quantity, rate, amount) {
-                        (Some(quantity), Some(rate), None) => InvoiceItemAmount::ByRate {
-                            quantity,
-                            rate: rate.try_into()?,
-                        },
-                        (None, None, Some(amount)) => InvoiceItemAmount::Total(amount.try_into()?),
-                        (_, _, _) => Err(Error::msg(format!(
-                            "Invoice item must specify either amount \
-                                exclusively or rate and quantity in {}",
-                            id
-                        )))?,
-                    },
-                })
-            })
-            .collect()
-    }
-
-    fn extras_try_from_raw_extras(
-        raw_extras: Option<Vec<raw_entry::Extra>>,
-        id: String,
-    ) -> Result<Option<Vec<InvoiceExtra>>> {
-        raw_extras
-            .map(|extras| {
-                extras
-                    .into_iter()
-                    .map(|raw_extra: raw_entry::Extra| {
-                        let raw_entry::Extra {
-                            description,
-                            account,
-                            amount,
-                            rate,
-                        } = raw_extra;
-                        Ok(InvoiceExtra {
-                            description,
-                            account,
-                            amount: match (amount, rate) {
-                                (Some(amount), None) => {
-                                    InvoiceExtraAmount::Total(amount.try_into()?)
-                                }
-                                (None, Some(rate)) => InvoiceExtraAmount::Rate(rate),
-                                (_, _) => Err(Error::msg(format!(
-                                    "Invoice extra must specify either amount or rate in {}",
-                                    id
-                                )))?,
-                            },
-                        })
-                    })
-                    .collect()
-            })
-            .transpose()
-    }
 }
 
 fn default_monthly_rrule(date: NaiveDate) -> rrule::Options {
@@ -227,28 +170,37 @@ fn default_monthly_rrule(date: NaiveDate) -> rrule::Options {
         .bymonthday(vec![date.day().try_into().unwrap()]) // unwrap ok, always <= 31
 }
 
-impl TryFrom<RawEntry> for Invoice {
+impl TryFrom<raw::Entry> for Invoice {
     type Error = Error;
 
-    fn try_from(raw_entry: RawEntry) -> Result<Self> {
-        let RawEntry {
-            id,
+    fn try_from(
+        raw::Entry {
             party,
             account,
             items,
             extras,
             payment,
             ..
-        } = raw_entry;
-        let id = id.context("Id missing!")?;
+        }: raw::Entry,
+    ) -> Result<Self> {
         Ok(Self {
             party,
-            items: Self::items_try_from_raw_items(
-                items.context(format!("Items not listed on Invoice {:?}", id))?,
-                account,
-                id.clone(),
-            )?,
-            extras: Self::extras_try_from_raw_extras(extras, id)?,
+            items: items
+                .context("Items not listed on Invoice")?
+                .into_iter()
+                .map(|mut raw_item| {
+                    raw_item.account.get_or_insert(account.clone());
+                    raw_item.try_into()
+                })
+                .collect::<Result<Vec<InvoiceItem>>>()?,
+            extras: extras
+                .map(|extras| {
+                    extras
+                        .into_iter()
+                        .map(|raw_extra| raw_extra.try_into())
+                        .collect()
+                })
+                .transpose()?,
             payment: payment
                 .map(|payment| -> Result<InvoicePayment> {
                     Ok(InvoicePayment {
@@ -257,6 +209,61 @@ impl TryFrom<RawEntry> for Invoice {
                     })
                 })
                 .transpose()?,
+        })
+    }
+}
+
+impl TryFrom<raw::Item> for InvoiceItem {
+    type Error = Error;
+
+    fn try_from(
+        raw::Item {
+            description,
+            code,
+            account,
+            amount,
+            quantity,
+            rate,
+        }: raw::Item,
+    ) -> Result<Self> {
+        Ok(InvoiceItem {
+            description,
+            code,
+            account: account.context("No account for Item!")?,
+            amount: match (quantity, rate, amount) {
+                (Some(quantity), Some(rate), None) => InvoiceItemAmount::ByRate {
+                    quantity,
+                    rate: rate.try_into()?,
+                },
+                (None, None, Some(amount)) => InvoiceItemAmount::Total(amount.try_into()?),
+                _ => bail!(
+                    "Invoice Item must specify either amount \
+                    exclusively or rate and quantity"
+                ),
+            },
+        })
+    }
+}
+
+impl TryFrom<raw::Extra> for InvoiceExtra {
+    type Error = Error;
+
+    fn try_from(
+        raw::Extra {
+            description,
+            account,
+            amount,
+            rate,
+        }: raw::Extra,
+    ) -> Result<Self> {
+        Ok(InvoiceExtra {
+            description,
+            account,
+            amount: match (amount, rate) {
+                (Some(amount), None) => InvoiceExtraAmount::Total(amount.try_into()?),
+                (None, Some(rate)) => InvoiceExtraAmount::Rate(rate),
+                (_, _) => bail!("Invoice Extra must specify either amount or rate"),
+            },
         })
     }
 }

@@ -71,6 +71,7 @@ async fn test_journal_from_entries() -> Result<()> {
     Ok(())
 }
 
+/// Test balances from entries
 #[async_std::test]
 async fn test_balance() -> Result<()> {
     let ledger = Ledger::new(Some("./tests/fixtures/entries"));
@@ -86,6 +87,7 @@ async fn test_balance() -> Result<()> {
     Ok(())
 }
 
+/// Test journal entries from recurring entries
 #[async_std::test]
 async fn test_recurring() -> Result<()> {
     let ledger = Ledger::new(Some("./tests/fixtures/entries_recurring"));

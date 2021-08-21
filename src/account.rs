@@ -1,3 +1,4 @@
+#![allow(clippy::new_without_default)]
 use self::Class::*;
 use anyhow::{bail, Result};
 
@@ -8,6 +9,11 @@ pub enum Class {
     Expense,
     Revenue,
     Equity,
+}
+
+pub enum Sign {
+    Debit,
+    Credit,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -37,10 +43,17 @@ pub trait Account {
 
     fn class(&self) -> Class;
 
-    fn is_debit(&self) -> bool {
+    fn sign(&self) -> Sign {
         match self.class() {
-            Asset | Expense => true,
-            Liability | Revenue | Equity => false,
+            Asset | Expense => Sign::Debit,
+            Liability | Revenue | Equity => Sign::Credit,
+        }
+    }
+
+    fn is_debit(&self) -> bool {
+        match self.sign() {
+            Sign::Debit => true,
+            Sign::Credit => false,
         }
     }
 
