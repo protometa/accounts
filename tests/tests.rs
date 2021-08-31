@@ -1,4 +1,6 @@
 use self::JournalAmountTest::*;
+use accounts::account::Type::*;
+use accounts::chart_of_accounts::ChartOfAccounts;
 use accounts::entry::Entry;
 use accounts::journal_entry::*;
 use accounts::*;
@@ -108,6 +110,20 @@ async fn test_recurring() -> Result<()> {
         .contains("2020-03-01", "Accounts Payable", Credit(150.00))
         .contains("2020-03-02", "Accounts Payable", Debit(150.00))
         .contains("2020-03-02", "Bank Account", Credit(150.00));
+    Ok(())
+}
+
+#[async_std::test]
+async fn test_chart_of_accounts() -> Result<()> {
+    let chart_of_accounts = ChartOfAccounts::new("./tests/fixtures/ChartOfAccounts.yaml").await?;
+    dbg!(&chart_of_accounts);
+    assert_eq!(
+        chart_of_accounts.get("Operating Expenses")?.acc_type,
+        Expense
+    );
+    assert_eq!(chart_of_accounts.get("Credit Card")?.acc_type, Liability);
+    assert_eq!(chart_of_accounts.get("Business Checking")?.acc_type, Asset);
+    assert_eq!(chart_of_accounts.get("Widget Sales")?.acc_type, Revenue);
     Ok(())
 }
 

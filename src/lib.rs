@@ -9,7 +9,6 @@ use async_std::fs::File;
 use async_std::io::prelude::*;
 use async_std::io::{stdin, BufReader};
 use async_walkdir::{DirEntry, WalkDir};
-use chart_of_accounts::ChartOfAccounts;
 use entry::Entry;
 use futures::future;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
@@ -21,14 +20,12 @@ use std::io::ErrorKind;
 use std::ops::AddAssign;
 
 pub struct Ledger {
-    pub chart_of_accounts: ChartOfAccounts,
     dir: Option<String>,
 }
 
 impl Ledger {
     pub fn new(dir: Option<&str>) -> Self {
         Ledger {
-            chart_of_accounts: ChartOfAccounts::new(),
             dir: dir.map(ToOwned::to_owned),
         }
     }
