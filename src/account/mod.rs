@@ -1,6 +1,8 @@
 #![allow(clippy::new_without_default)]
 mod raw;
 
+use self::Sign::*;
+use self::Type::*;
 use anyhow::{bail, Context, Error, Result};
 use std::{
     convert::{TryFrom, TryInto},
@@ -16,12 +18,34 @@ pub enum Type {
     Equity,
 }
 
+impl Default for Type {
+    fn default() -> Self {
+        Type::Equity
+    }
+}
+
+impl FromStr for Type {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let t = match s {
+            "Expense" => Type::Expense,
+            "Revenue" => Type::Revenue,
+            "Asset" => Type::Asset,
+            "Liability" => Type::Liability,
+            "Equity" => Type::Equity,
+            _ => bail!("Invalid account type {}", s),
+        };
+        Ok(t)
+    }
+}
+
+#[derive(Clone, Copy)]
 pub enum Sign {
     Debit,
     Credit,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tag(String);
 
 impl Tag {
@@ -43,7 +67,7 @@ macro_rules! tags {
     }};
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Account {
     pub acc_type: Type,
     pub name: String,
@@ -58,24 +82,39 @@ impl Account {
             tags,
         }
     }
+
+    pub fn sign(&self) -> Sign {
+        match self.acc_type {
+            Asset | Expense => Debit,
+            Liability | Revenue | Equity => Credit,
+        }
+    }
+
+    pub fn is_debit(&self) -> bool {
+        match self.sign() {
+            Debit => true,
+            Credit => false,
+        }
+    }
+
+    pub fn is_credit(&self) -> bool {
+        !self.is_debit()
+    }
+
+    pub fn has_tag(&self, tag: &Tag) -> bool {
+        self.tags.iter().find(|t| *t == tag).is_some()
+    }
 }
 
 impl TryFrom<raw::Account> for Account {
     type Error = Error;
 
     fn try_from(raw_account: raw::Account) -> Result<Self> {
-        let acc_type = match raw_account.r#type.as_str() {
-            "Expense" => Type::Expense,
-            "Revenue" => Type::Revenue,
-            "Asset" => Type::Asset,
-            "Liability" => Type::Liability,
-            "Equity" => Type::Equity,
-            _ => bail!("Invalid account type"),
-        };
-        let tags = match raw_account.tags {
-            Some(tags) => tags.iter().map(|t| Tag::new(t)).collect(),
-            None => Ok(Vec::new()),
-        }?;
+        let acc_type = raw_account.r#type.parse()?;
+        let tags = raw_account.tags.map_or_else(
+            || Ok(Vec::new()),
+            |tags| tags.iter().map(|t| Tag::new(t)).collect(),
+        )?;
         Ok(Account {
             acc_type,
             name: raw_account.name,

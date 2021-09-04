@@ -16,3 +16,11 @@ tags: [Currrent]
 name: Widget Sales
 type: Revenue
 tags: [Direct]
+---
+name: Accounts Receivable
+type: Asset
+tags: [Current]
+---
+name: Accounts Payable
+type: Liability
+tags: [Current]

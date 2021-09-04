@@ -3,6 +3,8 @@ use accounts::account::Type::*;
 use accounts::chart_of_accounts::ChartOfAccounts;
 use accounts::entry::Entry;
 use accounts::journal_entry::*;
+use accounts::money::Money;
+use accounts::report::{ReportNode, Total};
 use accounts::*;
 use anyhow::Result;
 use futures::stream::TryStreamExt;
@@ -115,7 +117,8 @@ async fn test_recurring() -> Result<()> {
 
 #[async_std::test]
 async fn test_chart_of_accounts() -> Result<()> {
-    let chart_of_accounts = ChartOfAccounts::new("./tests/fixtures/ChartOfAccounts.yaml").await?;
+    let chart_of_accounts =
+        ChartOfAccounts::from_file("./tests/fixtures/ChartOfAccounts.yaml").await?;
     dbg!(&chart_of_accounts);
     assert_eq!(
         chart_of_accounts.get("Operating Expenses")?.acc_type,
@@ -124,6 +127,73 @@ async fn test_chart_of_accounts() -> Result<()> {
     assert_eq!(chart_of_accounts.get("Credit Card")?.acc_type, Liability);
     assert_eq!(chart_of_accounts.get("Business Checking")?.acc_type, Asset);
     assert_eq!(chart_of_accounts.get("Widget Sales")?.acc_type, Revenue);
+    Ok(())
+}
+
+#[async_std::test]
+async fn test_report() -> Result<()> {
+    let report = ReportNode::from_file("./tests/fixtures/IncomeStatement.yaml").await?;
+    let items = report.items();
+    dbg!(&report);
+    dbg!(&items);
+    assert_eq!(
+        items[3].0,
+        vec!["Income Statement", "Expenses", "Indirect Expenses", "Rent"]
+    );
+    assert_eq!(
+        items[4].0,
+        vec!["Income Statement", "Expenses", "Direct Expenses"]
+    );
+    assert_eq!(
+        items[6].0,
+        vec!["Income Statement", "Revenue", "Direct Revenue"]
+    );
+    assert_eq!(
+        items[7].0,
+        vec!["Income Statement", "Revenue", "Indirect Revenue"]
+    );
+    Ok(())
+}
+
+#[async_std::test]
+async fn test_run_report() -> Result<()> {
+    let ledger = Ledger::new(Some("./tests/fixtures/entries"));
+    let chart_of_accounts =
+        ChartOfAccounts::from_file("./tests/fixtures/ChartOfAccounts.yaml").await?;
+    let mut report = ReportNode::from_file("./tests/fixtures/IncomeStatement.yaml").await?;
+    ledger.run_report(&chart_of_accounts, &mut report).await?;
+    let items = report.items();
+    dbg!(&items);
+
+    assert_eq!(items[0].0, vec!["Income Statement"],);
+    assert_eq!(items[0].1 .0, vec!["Operating Expenses", "Widget Sales"]);
+    assert_eq!(items[0].1 .1, 225.00.try_into()?);
+
+    assert_eq!(
+        items[4].0,
+        vec!["Income Statement", "Expenses", "Indirect Expenses", "Other"],
+    );
+    assert_eq!(items[4].1 .0, vec!["Operating Expenses"]);
+    assert_eq!(items[4].1 .1, 250.00.try_into()?);
+
+    assert_eq!(items[6].0, vec!["Income Statement", "Revenue"]);
+    assert_eq!(items[6].1 .0, vec!["Widget Sales"]);
+    assert_eq!(items[6].1 .1, 25.00.try_into()?);
+
+    assert_eq!(
+        items[7].0,
+        vec!["Income Statement", "Revenue", "Direct Revenue"]
+    );
+    assert_eq!(items[7].1 .0, vec!["Widget Sales"]);
+    assert_eq!(items[7].1 .1, 25.00.try_into()?);
+
+    assert_eq!(
+        items[8].0,
+        vec!["Income Statement", "Revenue", "Indirect Revenue"]
+    );
+    assert!(items[8].1 .0.is_empty());
+    assert_eq!(items[8].1 .1, 0.00.try_into()?);
+
     Ok(())
 }
 

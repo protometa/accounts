@@ -5,7 +5,7 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::ops::*;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, PartialOrd)]
 pub struct Money(pub Decimal);
 
 /// Basically this holds a Decimal that is scaled out to at least 2 dp (doesn't round).
@@ -60,6 +60,12 @@ impl Sub for Money {
 impl AddAssign for Money {
     fn add_assign(&mut self, other: Self) {
         self.0 += other.0
+    }
+}
+
+impl SubAssign for Money {
+    fn sub_assign(&mut self, other: Self) {
+        self.0 -= other.0
     }
 }
 

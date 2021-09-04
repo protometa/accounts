@@ -1,4 +1,3 @@
-#![allow(clippy::new_without_default)]
 use super::account::*;
 use anyhow::{anyhow, Error, Result};
 use async_std::fs::File;
@@ -13,7 +12,7 @@ pub type AccountId = usize;
 pub struct ChartOfAccounts(Vec<Account>);
 
 impl ChartOfAccounts {
-    pub async fn new(file: &str) -> Result<Self> {
+    pub async fn from_file(file: &str) -> Result<Self> {
         let file = File::open(file).await?;
         let accounts: Vec<Account> = BufReader::new(file)
             .lines()

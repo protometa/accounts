@@ -1,0 +1,20 @@
+header: Income Statement
+types: [Expense, Revenue]
+breakdown:
+  - header: Expenses
+    types: [Expense]
+    breakdown:
+      - header: Indirect Expenses
+        tags: [Indirect]
+        breakdown:
+          - header: Rent
+            names: [Shop Rent]
+      - header: Direct Expenses
+        names: [Cost of Sales]
+  - header: Revenue
+    types: [Revenue]
+    breakdown:
+      - header: Direct Revenue
+        tags: [Direct]
+      - header: Indirect Revenue
+        tags: [Indirect]

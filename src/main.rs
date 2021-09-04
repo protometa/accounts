@@ -1,5 +1,5 @@
 // use accounts;
-use accounts::*;
+use accounts::{chart_of_accounts::ChartOfAccounts, report::ReportNode, *};
 use anyhow::Result;
 use clap::{App, Arg};
 use futures::stream::TryStreamExt;
@@ -73,10 +73,9 @@ async fn main() -> Result<()> {
                 report.value_of("report spec"),
                 report.value_of("chart of accounts"),
             ) {
-                println!(
-                    "Show report for entries at {} with spec {} and chart {}!",
-                    entries, spec, chart
-                );
+                let chart = ChartOfAccounts::from_file(chart).await?;
+                let mut report = spec.parse()?;
+                let report = ledger.run_report(&chart, &mut report);
             }
         }
     };
