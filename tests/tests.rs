@@ -164,6 +164,7 @@ async fn test_run_report() -> Result<()> {
     ledger.run_report(&chart_of_accounts, &mut report).await?;
     let items = report.items();
     dbg!(&items);
+    println!("{}", report);
 
     assert_eq!(items[0].0, vec!["Income Statement"],);
     assert_eq!(items[0].1 .0, vec!["Operating Expenses", "Widget Sales"]);

@@ -9,11 +9,13 @@ use crate::account::{
 };
 use crate::journal_entry::JournalAmount;
 use crate::money::Money;
-use anyhow::{bail, Context, Error, Result};
+use anyhow::{Context, Error, Result};
 use async_std::fs;
 use num_traits::Zero;
 use std::{
+    borrow::ToOwned,
     convert::{TryFrom, TryInto},
+    fmt,
     str::FromStr,
 };
 
@@ -192,6 +194,26 @@ impl FromStr for ReportNode {
             .try_into()
             .with_context(|| format!("Failed to convert Report"))?;
         Ok(report_node)
+    }
+}
+
+impl fmt::Display for ReportNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for item in self.items().iter() {
+            let mut indentation = (1..item.0.len()).fold(String::new(), |mut ident, _| {
+                ident.push_str("  ");
+                ident
+            });
+            let header = item
+                .0
+                .last()
+                .map(ToOwned::to_owned)
+                .unwrap_or(String::new());
+            indentation.push_str(&header);
+            let indented_header = indentation;
+            writeln!(f, "{:<32}{:>6}", indented_header, item.1 .1)?;
+        }
+        Ok(())
     }
 }
 
