@@ -8,10 +8,10 @@ use crate::account::{
     Type::{self, *},
 };
 use crate::journal_entry::JournalAmount;
-use crate::money::Money;
+
 use anyhow::{Context, Error, Result};
 use async_std::fs;
-use num_traits::Zero;
+
 use std::{
     borrow::ToOwned,
     convert::{TryFrom, TryInto},
@@ -33,6 +33,8 @@ pub struct ReportNode {
 /// The names of the accounts and their total balance
 #[derive(Debug, Default, Clone)]
 pub struct Total(pub Vec<String>, pub JournalAmount);
+
+type LineItem = (Vec<String>, Sign, Total);
 
 impl ReportNode {
     pub async fn from_file(file: &str) -> Result<Self> {
@@ -67,15 +69,10 @@ impl ReportNode {
     fn matches(&self, account: &Account) -> bool {
         // account type must match if specified
         // in addition to matching on name or tags if they are specified
-        (self.types.is_empty()
-            || self
-                .types
-                .iter()
-                .find(|t| **t == account.acc_type)
-                .is_some())
+        (self.types.is_empty() || self.types.iter().any(|t| *t == account.acc_type))
             && ((self.names.is_empty() && self.tags.is_empty())
-                || (self.names.iter().find(|n| **n == account.name).is_some()
-                    || self.tags.iter().find(|t| account.has_tag(t)).is_some()))
+                || (self.names.iter().any(|n| *n == account.name)
+                    || self.tags.iter().any(|t| account.has_tag(t))))
     }
 
     fn default_sign(&self) -> Sign {
@@ -93,10 +90,10 @@ impl ReportNode {
     }
 
     fn has_type(&self, t1: Type) -> bool {
-        self.types.iter().find(|t2| **t2 == t1).is_some()
+        self.types.iter().any(|t2| *t2 == t1)
     }
 
-    pub fn items(&self) -> Result<Vec<(Vec<String>, Sign, Total)>> {
+    pub fn items(&self) -> Result<Vec<LineItem>> {
         Ok(self.items_with(Vec::new(), None)?.collect())
     }
 
@@ -104,15 +101,14 @@ impl ReportNode {
         &self,
         mut path: Vec<String>,
         sign: Option<Sign>,
-    ) -> Result<Box<dyn Iterator<Item = (Vec<String>, Sign, Total)>>> {
+    ) -> Result<Box<dyn Iterator<Item = LineItem>>> {
         path.push(self.header.clone());
         let sign = if self.types.is_empty() {
             sign.context("No sign for ReportNode")?
         } else {
             self.default_sign()
         };
-        let mut items = Vec::new();
-        items.push((path.clone(), sign, self.total()));
+        let items = vec![(path.clone(), sign, self.total())];
         let mut other = Vec::new();
         if self.total.1 != JournalAmount::default() && !self.children.is_empty() {
             let mut other_path = path.clone();
@@ -124,7 +120,7 @@ impl ReportNode {
                 self.children
                     .clone()
                     .into_iter()
-                    .map(move |node| node.items_with(path.clone(), Some(sign.clone())))
+                    .map(move |node| node.items_with(path.clone(), Some(sign)))
                     .collect::<Result<Vec<_>>>()?
                     .into_iter()
                     .flatten()
@@ -158,7 +154,7 @@ impl TryFrom<raw::ReportNode> for ReportNode {
             || Ok(Vec::new()),
             |tags| tags.iter().map(|t| Tag::new(t)).collect(),
         )?;
-        let names = raw_report.names.unwrap_or_else(|| Vec::new());
+        let names = raw_report.names.unwrap_or_else(Vec::new);
         let children = raw_report.breakdown.map_or_else(
             || Ok(Vec::new()),
             |raw_nodes| {
@@ -169,7 +165,7 @@ impl TryFrom<raw::ReportNode> for ReportNode {
             },
         )?;
         Ok(ReportNode {
-            header: raw_report.header.clone(),
+            header: raw_report.header,
             types,
             names,
             tags,
@@ -187,7 +183,7 @@ impl FromStr for ReportNode {
             .with_context(|| format!("Failed to deserialize Report:\n{}", doc))?;
         let report_node: ReportNode = raw_report_node
             .try_into()
-            .with_context(|| format!("Failed to convert Report"))?;
+            .with_context(|| "Failed to convert Report".to_string())?;
         Ok(report_node)
     }
 }
@@ -200,11 +196,7 @@ impl fmt::Display for ReportNode {
                 ident.push_str("  ");
                 ident
             });
-            let header = item
-                .0
-                .last()
-                .map(ToOwned::to_owned)
-                .unwrap_or(String::new());
+            let header = item.0.last().map(ToOwned::to_owned).unwrap_or_default();
             indentation.push_str(&header);
             let indented_header = indentation;
             // apply sign to journal ammount
@@ -223,7 +215,7 @@ impl fmt::Display for ReportNode {
 #[cfg(test)]
 mod report_tests {
     use super::*;
-    use crate::{account::Type::*, tags};
+    use crate::tags;
 
     #[test]
     fn match_tests() -> Result<()> {

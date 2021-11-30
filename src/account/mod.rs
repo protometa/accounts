@@ -102,7 +102,7 @@ impl Account {
     }
 
     pub fn has_tag(&self, tag: &Tag) -> bool {
-        self.tags.iter().find(|t| *t == tag).is_some()
+        self.tags.iter().any(|t| t == tag)
     }
 }
 
