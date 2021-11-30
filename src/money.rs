@@ -72,7 +72,11 @@ impl SubAssign for Money {
 impl Neg for Money {
     type Output = Money;
     fn neg(self) -> Money {
-        Money(-self.0)
+        if self != Money::default() {
+            Money(-self.0)
+        } else {
+            self
+        }
     }
 }
 

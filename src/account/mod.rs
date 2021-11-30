@@ -39,7 +39,7 @@ impl FromStr for Type {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Sign {
     Debit,
     Credit,

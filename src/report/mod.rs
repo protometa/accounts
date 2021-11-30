@@ -96,30 +96,41 @@ impl ReportNode {
         self.types.iter().find(|t2| **t2 == t1).is_some()
     }
 
-    pub fn items(&self) -> Vec<(Vec<String>, Total)> {
-        self.items_with(Vec::new()).collect()
+    pub fn items(&self) -> Result<Vec<(Vec<String>, Sign, Total)>> {
+        Ok(self.items_with(Vec::new(), None)?.collect())
     }
 
-    fn items_with(&self, mut path: Vec<String>) -> Box<dyn Iterator<Item = (Vec<String>, Total)>> {
+    fn items_with(
+        &self,
+        mut path: Vec<String>,
+        sign: Option<Sign>,
+    ) -> Result<Box<dyn Iterator<Item = (Vec<String>, Sign, Total)>>> {
         path.push(self.header.clone());
+        let sign = if self.types.is_empty() {
+            sign.context("No sign for ReportNode")?
+        } else {
+            self.default_sign()
+        };
         let mut items = Vec::new();
-        items.push((path.clone(), self.total()));
+        items.push((path.clone(), sign, self.total()));
         let mut other = Vec::new();
         if self.total.1 != JournalAmount::default() && !self.children.is_empty() {
             let mut other_path = path.clone();
             other_path.push("Other".to_string());
-            other.push((other_path, self.total.clone()))
+            other.push((other_path, sign, self.total.clone()))
         }
-        Box::new(
+        Ok(Box::new(
             items.into_iter().chain(
                 self.children
                     .clone()
                     .into_iter()
-                    .map(move |node| node.items_with(path.clone()))
+                    .map(move |node| node.items_with(path.clone(), Some(sign.clone())))
+                    .collect::<Result<Vec<_>>>()?
+                    .into_iter()
                     .flatten()
                     .chain(other),
             ),
-        )
+        ))
     }
 
     /// total of this node and all children
@@ -183,7 +194,8 @@ impl FromStr for ReportNode {
 
 impl fmt::Display for ReportNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for item in self.items().iter() {
+        let items = self.items().map_err(|_| std::fmt::Error::default());
+        for item in items?.iter() {
             let mut indentation = (1..item.0.len()).fold(String::new(), |mut ident, _| {
                 ident.push_str("  ");
                 ident
@@ -195,7 +207,14 @@ impl fmt::Display for ReportNode {
                 .unwrap_or(String::new());
             indentation.push_str(&header);
             let indented_header = indentation;
-            writeln!(f, "{:<32}{:>6}", indented_header, item.1 .1)?;
+            // apply sign to journal ammount
+            let total = match (item.1, item.2 .1) {
+                (Credit, JournalAmount::Credit(money)) => money,
+                (Credit, JournalAmount::Debit(money)) => -money,
+                (Debit, JournalAmount::Debit(money)) => money,
+                (Debit, JournalAmount::Credit(money)) => -money,
+            };
+            writeln!(f, "{:<32}{:>6}", indented_header, total)?;
         }
         Ok(())
     }
