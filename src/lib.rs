@@ -104,9 +104,9 @@ impl Ledger {
             .await?
             .iter()
             .try_fold(report, |report, (account, balance)| {
-                // recursively find total in report to which account applies and add name to list and value to total based on determined sign
+                // recursively find total in report to which account applies and add name to list and value to total
                 let account = chart.get(account)?;
-                report.apply_balance((account, balance), None)?;
+                report.apply_balance((account, balance))?;
                 Ok(report)
             })
     }

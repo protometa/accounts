@@ -18,6 +18,12 @@ pub enum JournalAmount {
     Credit(Money),
 }
 
+impl Default for JournalAmount {
+    fn default() -> Self {
+        JournalAmount::Debit(Money::default())
+    }
+}
+
 impl JournalAmount {
     pub fn new() -> Self {
         Debit(Money::zero())

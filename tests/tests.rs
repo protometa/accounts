@@ -168,32 +168,32 @@ async fn test_run_report() -> Result<()> {
 
     assert_eq!(items[0].0, vec!["Income Statement"],);
     assert_eq!(items[0].1 .0, vec!["Operating Expenses", "Widget Sales"]);
-    assert_eq!(items[0].1 .1, 225.00.try_into()?);
+    assert_eq!(items[0].1 .1, JournalAmount::Debit(225.00.try_into()?));
 
     assert_eq!(
         items[4].0,
         vec!["Income Statement", "Expenses", "Indirect Expenses", "Other"],
     );
     assert_eq!(items[4].1 .0, vec!["Operating Expenses"]);
-    assert_eq!(items[4].1 .1, 250.00.try_into()?);
+    assert_eq!(items[4].1 .1, JournalAmount::Debit(250.00.try_into()?));
 
     assert_eq!(items[6].0, vec!["Income Statement", "Revenue"]);
     assert_eq!(items[6].1 .0, vec!["Widget Sales"]);
-    assert_eq!(items[6].1 .1, 25.00.try_into()?);
+    assert_eq!(items[6].1 .1, JournalAmount::Credit(25.00.try_into()?));
 
     assert_eq!(
         items[7].0,
         vec!["Income Statement", "Revenue", "Direct Revenue"]
     );
     assert_eq!(items[7].1 .0, vec!["Widget Sales"]);
-    assert_eq!(items[7].1 .1, 25.00.try_into()?);
+    assert_eq!(items[7].1 .1, JournalAmount::Credit(25.00.try_into()?));
 
     assert_eq!(
         items[8].0,
         vec!["Income Statement", "Revenue", "Indirect Revenue"]
     );
     assert!(items[8].1 .0.is_empty());
-    assert_eq!(items[8].1 .1, 0.00.try_into()?);
+    assert_eq!(items[8].1 .1, JournalAmount::default());
 
     Ok(())
 }

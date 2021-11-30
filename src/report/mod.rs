@@ -32,7 +32,7 @@ pub struct ReportNode {
 
 /// The names of the accounts and their total balance
 #[derive(Debug, Default, Clone)]
-pub struct Total(pub Vec<String>, pub Money);
+pub struct Total(pub Vec<String>, pub JournalAmount);
 
 impl ReportNode {
     pub async fn from_file(file: &str) -> Result<Self> {
@@ -43,22 +43,15 @@ impl ReportNode {
     pub fn apply_balance(
         &mut self,
         (account, balance): (&Account, &JournalAmount),
-        sign: Option<Sign>,
     ) -> Result<bool> {
         // if doesn't match this node return false
         if !self.matches(account) {
             return Ok(false);
         }
-        // use given sign or default sign for this node's types
-        let sign = if self.types.is_empty() {
-            sign.context("No sign for ReportNode")?
-        } else {
-            self.default_sign()
-        };
-        // attempt to apply to any children with sign
+        // attempt to apply to any children
         let mut found = false;
         for node in &mut self.children {
-            if node.apply_balance((account, balance), Some(sign))? {
+            if node.apply_balance((account, balance))? {
                 found = true;
                 break;
             }
@@ -66,16 +59,7 @@ impl ReportNode {
         if !found {
             // if not applied to children apply to this
             self.total.0.push(account.name.clone());
-            match balance {
-                &JournalAmount::Debit(balance) => match sign {
-                    Debit => self.total.1 += balance,
-                    Credit => self.total.1 -= balance,
-                },
-                &JournalAmount::Credit(balance) => match sign {
-                    Debit => self.total.1 -= balance,
-                    Credit => self.total.1 += balance,
-                },
-            }
+            self.total.1 += *balance;
         }
         Ok(true)
     }
@@ -84,11 +68,11 @@ impl ReportNode {
         // account type must match if specified
         // in addition to matching on name or tags if they are specified
         (self.types.is_empty()
-            || dbg!(self
+            || self
                 .types
                 .iter()
                 .find(|t| **t == account.acc_type)
-                .is_some()))
+                .is_some())
             && ((self.names.is_empty() && self.tags.is_empty())
                 || (self.names.iter().find(|n| **n == account.name).is_some()
                     || self.tags.iter().find(|t| account.has_tag(t)).is_some()))
@@ -121,7 +105,7 @@ impl ReportNode {
         let mut items = Vec::new();
         items.push((path.clone(), self.total()));
         let mut other = Vec::new();
-        if self.total.1 > Money::zero() && !self.children.is_empty() {
+        if self.total.1 != JournalAmount::default() && !self.children.is_empty() {
             let mut other_path = path.clone();
             other_path.push("Other".to_string());
             other.push((other_path, self.total.clone()))
@@ -179,7 +163,7 @@ impl TryFrom<raw::ReportNode> for ReportNode {
             names,
             tags,
             children,
-            total: Total(Vec::new(), Money::zero()),
+            total: Total(Vec::new(), JournalAmount::default()),
         })
     }
 }
