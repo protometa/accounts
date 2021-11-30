@@ -3,6 +3,7 @@ use accounts::{chart_of_accounts::ChartOfAccounts, report::ReportNode, *};
 use anyhow::Result;
 use clap::{App, Arg};
 use futures::stream::TryStreamExt;
+use std::fs;
 
 #[async_std::main]
 async fn main() -> Result<()> {
@@ -74,8 +75,9 @@ async fn main() -> Result<()> {
                 report.value_of("chart of accounts"),
             ) {
                 let chart = ChartOfAccounts::from_file(chart).await?;
-                let mut report = spec.parse()?;
-                let report = ledger.run_report(&chart, &mut report);
+                let mut report = fs::read_to_string(spec)?.parse()?;
+                let report = ledger.run_report(&chart, &mut report).await?;
+                println!("{}", report)
             }
         }
     };
