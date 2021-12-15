@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
         .subcommand(App::new("balances").about("Shows account balances"))
         .subcommand(
             App::new("report")
-                .about("Run report given report spec and chart of accounts")
+                .about("Runs report given report spec and chart of accounts")
                 .arg(
                     Arg::new("report spec")
                         .short('s')
