@@ -54,13 +54,12 @@ async fn main() -> Result<()> {
             Ledger::new(Some(entries))
         };
         if matches.subcommand_matches("journal").is_some() {
-            ledger
-                .journal()
-                .try_for_each(|entry| async move {
-                    println!("{}", entry);
-                    Ok(())
-                })
-                .await?;
+            let mut journal_entries: Vec<journal_entry::JournalEntry> =
+                ledger.journal().try_collect().await?;
+            journal_entries.sort_by_key(|x| x.0);
+            journal_entries.into_iter().for_each(|entry| {
+                println!("{}", entry);
+            });
         } else if matches.subcommand_matches("balances").is_some() {
             ledger
                 .balances()
