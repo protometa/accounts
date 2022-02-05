@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
                 .await?
                 .iter()
                 .for_each(|(account, amount)| {
-                    println!("| {:25} | {} |", account, amount);
+                    println!("{:25} | {}", account, amount);
                 });
         } else if let Some(report) = matches.subcommand_matches("report") {
             if let (Some(spec), Some(chart)) = (

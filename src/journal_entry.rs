@@ -148,6 +148,6 @@ impl JournalEntry {
 impl fmt::Display for JournalEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self(date, account, amount) = self;
-        write!(f, "| {} | {:25} | {} |", date, account.to_string(), amount)
+        write!(f, "{} | {:25} | {}", date, account.to_string(), amount)
     }
 }
