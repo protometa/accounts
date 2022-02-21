@@ -61,13 +61,20 @@ async fn main() -> Result<()> {
                 println!("{}", entry);
             });
         } else if matches.subcommand_matches("balances").is_some() {
-            ledger
-                .balances()
-                .await?
-                .iter()
-                .for_each(|(account, amount)| {
-                    println!("{:25} | {}", account, amount);
-                });
+            let balances = ledger.balances().await?;
+            let total = balances.iter().fold(
+                journal_entry::JournalAmount::default(),
+                |mut acc, amount| {
+                    acc += *amount.1;
+                    acc
+                },
+            );
+            balances.iter().for_each(|(account, amount)| {
+                println!("{:25} | {}", account, amount);
+            });
+            if total != journal_entry::JournalAmount::default() {
+                println!("ERROR                     | {}", total);
+            }
         } else if let Some(report) = matches.subcommand_matches("report") {
             if let (Some(spec), Some(chart)) = (
                 report.value_of("report spec"),
