@@ -21,6 +21,14 @@ async fn main() -> Result<()> {
                 .default_value("./")
                 .takes_value(true),
         )
+        .arg(
+            Arg::new("party")
+                .short('p')
+                .long("party")
+                .about("Applies commands to entries filtered by party")
+                .value_name("PARTY")
+                .takes_value(true),
+        )
         .subcommand(App::new("journal").about("Shows journal"))
         .subcommand(App::new("balances").about("Shows account balances"))
         .subcommand(
@@ -56,14 +64,24 @@ async fn main() -> Result<()> {
             Ledger::new(Some(entries))
         };
         if matches.subcommand_matches("journal").is_some() {
-            let mut journal_entries: Vec<journal_entry::JournalEntry> =
-                ledger.journal().try_collect().await?;
+            let mut journal_entries: Vec<journal_entry::JournalEntry> = ledger
+                .journal(matches.value_of("party").map(ToOwned::to_owned))
+                .try_collect()
+                .await?;
+            if let Some(party) = matches.value_of("party") {
+                journal_entries = journal_entries
+                    .into_iter()
+                    .filter(|entry| entry.3.clone().map_or(false, |p| p == party))
+                    .collect()
+            }
             journal_entries.sort_by_key(|x| x.0);
             journal_entries.into_iter().for_each(|entry| {
                 println!("{}", entry);
             });
         } else if matches.subcommand_matches("balances").is_some() {
-            let balances = ledger.balances().await?;
+            let balances = ledger
+                .balances(matches.value_of("party").map(ToOwned::to_owned))
+                .await?;
             let total = balances.iter().fold(
                 journal_entry::JournalAmount::default(),
                 |mut acc, amount| {

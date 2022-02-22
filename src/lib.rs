@@ -71,17 +71,25 @@ impl Ledger {
     }
 
     /// Convert own stream of `Entry`s into `JournalEntry`s
-    pub fn journal(&self) -> impl Stream<Item = Result<JournalEntry>> + '_ {
+    pub fn journal(&self, party: Option<String>) -> impl Stream<Item = Result<JournalEntry>> + '_ {
         self.entries()
             .and_then(|entry| async {
                 Ok(stream::iter(JournalEntry::from_entry(entry, None)?).map(Ok))
             })
             .try_flatten()
+            .try_filter(move |entry| {
+                future::ready(
+                    entry
+                        .3
+                        .clone()
+                        .map_or(false, |p| party.clone().map_or(false, |party| p == party)),
+                )
+            })
     }
 
     /// Get balances for each account appearing in own stream of `JournalEntry`s
-    pub fn balances(&self) -> impl Future<Output = Result<Balances>> + '_ {
-        self.journal().try_fold(
+    pub fn balances(&self, party: Option<String>) -> impl Future<Output = Result<Balances>> + '_ {
+        self.journal(party).try_fold(
             HashMap::new(),
             |mut acc, JournalEntry(_, account, amount, _)| async move {
                 acc.entry(account.clone())
@@ -100,7 +108,7 @@ impl Ledger {
         chart: &ChartOfAccounts,
         report: &'a mut ReportNode,
     ) -> Result<&'a mut ReportNode> {
-        self.balances()
+        self.balances(None)
             .await?
             .iter()
             .try_fold(report, |report, (account, balance)| {
@@ -112,7 +120,7 @@ impl Ledger {
     }
 
     pub fn payable(&self) -> impl Future<Output = Result<HashMap<String, JournalAmount>>> + '_ {
-        self.journal().try_fold(
+        self.journal(None).try_fold(
             HashMap::new(),
             |mut acc, JournalEntry(_, account, amount, party)| async move {
                 if account == "Accounts Payable" {
@@ -130,7 +138,7 @@ impl Ledger {
     }
 
     pub fn receivable(&self) -> impl Future<Output = Result<HashMap<String, JournalAmount>>> + '_ {
-        self.journal().try_fold(
+        self.journal(None).try_fold(
             HashMap::new(),
             |mut acc, JournalEntry(_, account, amount, party)| async move {
                 if account == "Accounts Receivable" {
