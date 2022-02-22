@@ -83,7 +83,7 @@ impl Ledger {
     pub fn balances(&self) -> impl Future<Output = Result<Balances>> + '_ {
         self.journal().try_fold(
             HashMap::new(),
-            |mut acc, JournalEntry(_, account, amount)| async move {
+            |mut acc, JournalEntry(_, account, amount, _)| async move {
                 acc.entry(account.clone())
                     .and_modify(|total: &mut JournalAmount| {
                         total.add_assign(amount);
@@ -109,5 +109,41 @@ impl Ledger {
                 report.apply_balance((account, balance))?;
                 Ok(report)
             })
+    }
+
+    pub fn payable(&self) -> impl Future<Output = Result<HashMap<String, JournalAmount>>> + '_ {
+        self.journal().try_fold(
+            HashMap::new(),
+            |mut acc, JournalEntry(_, account, amount, party)| async move {
+                if account == "Accounts Payable" {
+                    if let Some(party) = party {
+                        acc.entry(party.clone())
+                            .and_modify(|total: &mut JournalAmount| {
+                                total.add_assign(amount);
+                            })
+                            .or_insert(amount);
+                    }
+                }
+                Ok(acc)
+            },
+        )
+    }
+
+    pub fn receivable(&self) -> impl Future<Output = Result<HashMap<String, JournalAmount>>> + '_ {
+        self.journal().try_fold(
+            HashMap::new(),
+            |mut acc, JournalEntry(_, account, amount, party)| async move {
+                if account == "Accounts Receivable" {
+                    if let Some(party) = party {
+                        acc.entry(party.clone())
+                            .and_modify(|total: &mut JournalAmount| {
+                                total.add_assign(amount);
+                            })
+                            .or_insert(amount);
+                    }
+                }
+                Ok(acc)
+            },
+        )
     }
 }

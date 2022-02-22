@@ -45,6 +45,8 @@ async fn main() -> Result<()> {
                         .required(true),
                 ),
         )
+        .subcommand(App::new("payable").about("Shows accounts payable balances by party"))
+        .subcommand(App::new("receivable").about("Shows accounts receivable balances by party"))
         .get_matches();
 
     if let Some(entries) = matches.value_of("entries") {
@@ -85,6 +87,16 @@ async fn main() -> Result<()> {
                 let report = ledger.run_report(&chart, &mut report).await?;
                 println!("{}", report)
             }
+        } else if matches.subcommand_matches("payable").is_some() {
+            let payables = ledger.payable().await?;
+            payables.iter().for_each(|(account, amount)| {
+                println!("{:25} | {}", account, amount);
+            });
+        } else if matches.subcommand_matches("receivable").is_some() {
+            let receivables = ledger.receivable().await?;
+            receivables.iter().for_each(|(account, amount)| {
+                println!("{:25} | {}", account, amount);
+            });
         }
     };
     Ok(())

@@ -11,6 +11,7 @@ use std::fmt;
 use std::ops::AddAssign;
 
 pub type JournalAccount = String;
+pub type JournalParty = Option<String>;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum JournalAmount {
@@ -60,7 +61,12 @@ impl AddAssign for JournalAmount {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct JournalEntry(pub NaiveDate, pub JournalAccount, pub JournalAmount);
+pub struct JournalEntry(
+    pub NaiveDate,
+    pub JournalAccount,
+    pub JournalAmount,
+    pub JournalParty,
+);
 
 impl JournalEntry {
     pub fn from_entry(entry: Entry, until: Option<NaiveDate>) -> Result<Vec<Self>> {
@@ -76,11 +82,17 @@ impl JournalEntry {
                 }
 
                 EntryBody::PaymentSent(payment) => Ok(vec![
-                    JournalEntry(date, payment.account, Credit(payment.amount)),
+                    JournalEntry(
+                        date,
+                        payment.account,
+                        Credit(payment.amount),
+                        Some(payment.party.clone()),
+                    ),
                     JournalEntry(
                         date,
                         String::from("Accounts Payable"),
                         Debit(payment.amount),
+                        Some(payment.party.clone()),
                     ),
                 ]),
 
@@ -89,11 +101,17 @@ impl JournalEntry {
                 }
 
                 EntryBody::PaymentReceived(payment) => Ok(vec![
-                    JournalEntry(date, payment.account, Debit(payment.amount)),
+                    JournalEntry(
+                        date,
+                        payment.account,
+                        Debit(payment.amount),
+                        Some(payment.party.clone()),
+                    ),
                     JournalEntry(
                         date,
                         String::from("Accounts Receivable"),
                         Credit(payment.amount),
+                        Some(payment.party.clone()),
                     ),
                 ]),
             })
@@ -123,6 +141,7 @@ impl JournalEntry {
                     date,
                     item.account.clone(),
                     amount_contructor(item.total()?),
+                    Some(invoice.party.clone()),
                 ))
             })
             .collect::<Result<Vec<Self>>>()?; // TODO include inventory entries if tracking
@@ -137,8 +156,20 @@ impl JournalEntry {
             Sign::Credit => String::from("Accounts Receivable"),
         };
         let contra_entry = match invoice.payment {
-            None => JournalEntry(date, contra_account, contra_amount),
-            Some(payment) => JournalEntry(date, payment.account, contra_amount),
+            None => JournalEntry(
+                date,
+                contra_account,
+                contra_amount,
+                Some(invoice.party.clone()),
+            ),
+            // TODO this doesn't appear to take into account payment amount separate from
+            // contra_amount
+            Some(payment) => JournalEntry(
+                date,
+                payment.account,
+                contra_amount,
+                Some(invoice.party.clone()),
+            ),
         };
         entries.push(contra_entry);
         Ok(entries)
@@ -147,7 +178,7 @@ impl JournalEntry {
 
 impl fmt::Display for JournalEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self(date, account, amount) = self;
+        let Self(date, account, amount, _) = self;
         write!(f, "{} | {:25} | {}", date, account.to_string(), amount)
     }
 }
