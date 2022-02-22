@@ -79,10 +79,9 @@ impl Ledger {
             .try_flatten()
             .try_filter(move |entry| {
                 future::ready(
-                    entry
-                        .3
+                    party
                         .clone()
-                        .map_or(false, |p| party.clone().map_or(false, |party| p == party)),
+                        .map_or(true, |p| entry.3.clone().map_or(false, |party| p == party)),
                 )
             })
     }
