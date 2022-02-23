@@ -111,9 +111,9 @@ mod money_tests {
     }
 
     #[test]
-    #[should_panic(expected = "Addition overflowed")]
+    #[should_panic(expected = "Failed to convert")]
     #[allow(unused_must_use)]
-    fn test_add_panic() -> () {
-        Money::try_from(7.9e28).unwrap() + Money::try_from(7.9e28).unwrap();
+    fn test_add_panic() {
+        dbg!(Money::try_from(8e83).unwrap());
     }
 }

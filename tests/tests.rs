@@ -3,8 +3,7 @@ use accounts::account::Type::*;
 use accounts::chart_of_accounts::ChartOfAccounts;
 use accounts::entry::Entry;
 use accounts::journal_entry::*;
-use accounts::money::Money;
-use accounts::report::{ReportNode, Total};
+use accounts::report::ReportNode;
 use accounts::*;
 use anyhow::Result;
 use futures::stream::TryStreamExt;
@@ -52,26 +51,86 @@ async fn test_multiple_entries_in_one_file() -> Result<()> {
 async fn test_journal_from_entries() -> Result<()> {
     let ledger = Ledger::new(Some("./tests/fixtures/entries"));
 
-    let journal_entries: Vec<JournalEntry> = ledger.journal().try_collect().await?;
+    let journal_entries: Vec<JournalEntry> = ledger.journal(None).try_collect().await?;
 
     assert_eq!(dbg!(&journal_entries).iter().count(), 16);
     Expect(&journal_entries)
-        .contains("2020-01-01", "Operating Expenses", Debit(100.00))
-        .contains("2020-01-01", "Accounts Payable", Credit(100.00))
-        .contains("2020-01-02", "Accounts Payable", Debit(100.00))
-        .contains("2020-01-02", "Credit Card", Credit(100.00))
-        .contains("2020-01-03", "Operating Expenses", Debit(50.00))
-        .contains("2020-01-03", "Business Checking", Credit(50.00))
-        .contains("2020-01-04", "Operating Expenses", Debit(100.00))
-        .contains("2020-01-04", "Accounts Payable", Credit(100.00))
-        .contains("2020-01-05", "Accounts Receivable", Debit(10.00))
-        .contains("2020-01-05", "Widget Sales", Credit(10.00))
-        .contains("2020-01-06", "Business Checking", Debit(10.00))
-        .contains("2020-01-06", "Accounts Receivable", Credit(10.00))
-        .contains("2020-01-07", "Business Checking", Debit(5.00))
-        .contains("2020-01-07", "Widget Sales", Credit(5.00))
-        .contains("2020-01-08", "Accounts Receivable", Debit(10.00))
-        .contains("2020-01-08", "Widget Sales", Credit(10.00));
+        .contains(
+            "2020-01-01",
+            "Operating Expenses",
+            Debit(100.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-01-01",
+            "Accounts Payable",
+            Credit(100.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-01-02",
+            "Accounts Payable",
+            Debit(100.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-01-02",
+            "Credit Card",
+            Credit(100.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-01-03",
+            "Operating Expenses",
+            Debit(50.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-01-03",
+            "Business Checking",
+            Credit(50.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-01-04",
+            "Operating Expenses",
+            Debit(100.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-01-04",
+            "Accounts Payable",
+            Credit(100.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-01-05",
+            "Accounts Receivable",
+            Debit(10.00),
+            "John Smith",
+        )
+        .contains("2020-01-05", "Widget Sales", Credit(10.00), "John Smith")
+        .contains(
+            "2020-01-06",
+            "Business Checking",
+            Debit(10.00),
+            "John Smith",
+        )
+        .contains(
+            "2020-01-06",
+            "Accounts Receivable",
+            Credit(10.00),
+            "John Smith",
+        )
+        .contains("2020-01-07", "Business Checking", Debit(5.00), "John Smith")
+        .contains("2020-01-07", "Widget Sales", Credit(5.00), "John Smith")
+        .contains(
+            "2020-01-08",
+            "Accounts Receivable",
+            Debit(10.00),
+            "John Smith",
+        )
+        .contains("2020-01-08", "Widget Sales", Credit(10.00), "John Smith");
     Ok(())
 }
 
@@ -79,7 +138,7 @@ async fn test_journal_from_entries() -> Result<()> {
 #[async_std::test]
 async fn test_balance() -> Result<()> {
     let ledger = Ledger::new(Some("./tests/fixtures/entries"));
-    let balances = ledger.balances().await?;
+    let balances = ledger.balances(None).await?;
     assert_eq!(balances.iter().count(), 6);
     Expect(&balances)
         .contains("Operating Expenses", Debit(250.00))
@@ -96,22 +155,82 @@ async fn test_balance() -> Result<()> {
 async fn test_recurring() -> Result<()> {
     let ledger = Ledger::new(Some("./tests/fixtures/entries_recurring"));
 
-    let journal_entries: Vec<JournalEntry> = ledger.journal().try_collect().await?;
+    let journal_entries: Vec<JournalEntry> = ledger.journal(None).try_collect().await?;
 
     assert_eq!(dbg!(&journal_entries).iter().count(), 12);
     Expect(&journal_entries)
-        .contains("2020-01-01", "Operating Expenses", Debit(100.00))
-        .contains("2020-01-01", "Accounts Payable", Credit(100.00))
-        .contains("2020-01-02", "Accounts Payable", Debit(100.00))
-        .contains("2020-01-02", "Bank Account", Credit(100.00))
-        .contains("2020-02-01", "Operating Expenses", Debit(100.00))
-        .contains("2020-02-01", "Accounts Payable", Credit(100.00))
-        .contains("2020-02-03", "Accounts Payable", Debit(100.00))
-        .contains("2020-02-03", "Bank Account", Credit(100.00))
-        .contains("2020-03-01", "Operating Expenses", Debit(150.00))
-        .contains("2020-03-01", "Accounts Payable", Credit(150.00))
-        .contains("2020-03-02", "Accounts Payable", Debit(150.00))
-        .contains("2020-03-02", "Bank Account", Credit(150.00));
+        .contains(
+            "2020-01-01",
+            "Operating Expenses",
+            Debit(100.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-01-01",
+            "Accounts Payable",
+            Credit(100.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-01-02",
+            "Accounts Payable",
+            Debit(100.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-01-02",
+            "Bank Account",
+            Credit(100.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-02-01",
+            "Operating Expenses",
+            Debit(100.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-02-01",
+            "Accounts Payable",
+            Credit(100.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-02-03",
+            "Accounts Payable",
+            Debit(100.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-02-03",
+            "Bank Account",
+            Credit(100.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-03-01",
+            "Operating Expenses",
+            Debit(150.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-03-01",
+            "Accounts Payable",
+            Credit(150.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-03-02",
+            "Accounts Payable",
+            Debit(150.00),
+            "ACME Business Services",
+        )
+        .contains(
+            "2020-03-02",
+            "Bank Account",
+            Credit(150.00),
+            "ACME Business Services",
+        );
     Ok(())
 }
 
@@ -208,7 +327,7 @@ enum JournalAmountTest {
 struct Expect<'a, T>(&'a T);
 
 impl Expect<'_, Vec<JournalEntry>> {
-    fn contains(&self, date: &str, account: &str, amount: JournalAmountTest) -> &Self {
+    fn contains(&self, date: &str, account: &str, amount: JournalAmountTest, party: &str) -> &Self {
         let expected = &&JournalEntry(
             date.parse().unwrap(),
             account.into(),
@@ -216,6 +335,7 @@ impl Expect<'_, Vec<JournalEntry>> {
                 Debit(m) => JournalAmount::Debit(m.try_into().unwrap()),
                 Credit(m) => JournalAmount::Credit(m.try_into().unwrap()),
             },
+            Some(party.to_owned()),
         );
         assert!(
             self.0.iter().find(|actual| actual == expected).is_some(),
