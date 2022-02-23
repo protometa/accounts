@@ -139,7 +139,7 @@ async fn test_journal_from_entries() -> Result<()> {
 async fn test_balance() -> Result<()> {
     let ledger = Ledger::new(Some("./tests/fixtures/entries"));
     let balances = ledger.balances(None).await?;
-    assert_eq!(balances.iter().count(), 6);
+    assert_eq!(balances.len(), 6);
     Expect(&balances)
         .contains("Operating Expenses", Debit(250.00))
         .contains("Accounts Payable", Credit(100.00))
@@ -328,7 +328,7 @@ struct Expect<'a, T>(&'a T);
 
 impl Expect<'_, Vec<JournalEntry>> {
     fn contains(&self, date: &str, account: &str, amount: JournalAmountTest, party: &str) -> &Self {
-        let expected = &&JournalEntry(
+        let expected = &JournalEntry(
             date.parse().unwrap(),
             account.into(),
             match amount {
@@ -338,7 +338,7 @@ impl Expect<'_, Vec<JournalEntry>> {
             Some(party.to_owned()),
         );
         assert!(
-            self.0.iter().find(|actual| actual == expected).is_some(),
+            self.0.iter().any(|actual| actual == expected),
             "{:?} not found in {:?}",
             expected,
             self.0
@@ -356,8 +356,7 @@ impl Expect<'_, HashMap<JournalAccount, JournalAmount>> {
         assert!(
             self.0
                 .iter()
-                .find(|actual| actual.0 == account && actual.1 == &amount)
-                .is_some(),
+                .any(|actual| actual.0 == account && actual.1 == &amount),
             "({}: {:?}) not found in {:?}",
             account,
             amount,

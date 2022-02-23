@@ -92,7 +92,7 @@ impl JournalEntry {
                         date,
                         String::from("Accounts Payable"),
                         Debit(payment.amount),
-                        Some(payment.party.clone()),
+                        Some(payment.party),
                     ),
                 ]),
 
@@ -111,7 +111,7 @@ impl JournalEntry {
                         date,
                         String::from("Accounts Receivable"),
                         Credit(payment.amount),
-                        Some(payment.party.clone()),
+                        Some(payment.party),
                     ),
                 ]),
             })

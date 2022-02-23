@@ -124,7 +124,7 @@ impl Ledger {
             |mut acc, JournalEntry(_, account, amount, party)| async move {
                 if account == "Accounts Payable" {
                     if let Some(party) = party {
-                        acc.entry(party.clone())
+                        acc.entry(party)
                             .and_modify(|total: &mut JournalAmount| {
                                 total.add_assign(amount);
                             })
@@ -142,7 +142,7 @@ impl Ledger {
             |mut acc, JournalEntry(_, account, amount, party)| async move {
                 if account == "Accounts Receivable" {
                     if let Some(party) = party {
-                        acc.entry(party.clone())
+                        acc.entry(party)
                             .and_modify(|total: &mut JournalAmount| {
                                 total.add_assign(amount);
                             })

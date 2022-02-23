@@ -28,6 +28,6 @@ impl ChartOfAccounts {
         self.0
             .iter()
             .find(|account| account.name == name)
-            .ok_or(anyhow!("Account {} not found", name))
+            .ok_or_else(|| anyhow!("Account {} not found", name))
     }
 }
