@@ -4,7 +4,7 @@ use super::money::Money;
 use anyhow::{bail, Context, Error, Result};
 use chrono::prelude::*;
 use chrono_tz::UTC;
-use rrule::{Frequenzy, Options, RRule};
+use rrule::{Frequency, RRule, RRuleProperties};
 use rust_decimal::Decimal;
 use std::convert::{TryFrom, TryInto};
 use std::iter::{self, Iterator};
@@ -28,7 +28,7 @@ impl EntryDate {
     fn iter(&self) -> Box<dyn Iterator<Item = NaiveDate> + '_> {
         match self {
             EntryDate::SingleDate(date) => Box::new(iter::once(*date)),
-            EntryDate::RRule(rrule) => Box::new(rrule.into_iter().map(|d| d.date().naive_local())),
+            EntryDate::RRule(rrule) => Box::new(rrule.into_iter().map(|d| d.date().naive_utc())),
         }
     }
 }
@@ -69,17 +69,10 @@ impl TryFrom<raw::Entry> for Entry {
                 |rule_str| {
                     let ed = match rule_str.to_uppercase().as_str() {
                         // if simply MONTHLY use basic monthy rrule
-                        "MONTHLY" => end
-                            .map_or(default_monthly_rrule(date), |end| {
-                                default_monthly_rrule(date).until(
-                                    Local
-                                        .ymd(end.year(), end.month(), end.day())
-                                        .and_hms(0, 0, 0)
-                                        .with_timezone(&Utc),
-                                )
-                            })
-                            .build()
-                            .map(RRule::new)?,
+                        "MONTHLY" => RRule::new(end.map_or(default_monthly_rrule(date), |end| {
+                            default_monthly_rrule(date)
+                                .until(Utc.from_utc_datetime(&end.and_hms(0, 0, 0)))
+                        }))?,
                         rule_str => rule_str.parse()?,
                     };
                     Ok(EntryDate::RRule(Box::new(ed)))
@@ -158,16 +151,12 @@ pub struct Invoice {
     pub payment: Option<InvoicePayment>,
 }
 
-fn default_monthly_rrule(date: NaiveDate) -> rrule::Options {
-    Options::new()
-        .dtstart(
-            Local
-                .ymd(date.year(), date.month(), date.day())
-                .and_hms(0, 0, 0)
-                .with_timezone(&UTC),
-        )
-        .freq(Frequenzy::Monthly)
-        .bymonthday(vec![date.day().try_into().unwrap()]) // unwrap ok, always <= 31
+fn default_monthly_rrule(date: NaiveDate) -> RRuleProperties {
+    RRuleProperties::new(
+        Frequency::Monthly,
+        UTC.from_utc_datetime(&date.and_hms(0, 0, 0)),
+    )
+    .by_month_day(vec![date.day().try_into().unwrap()]) // unwrap ok, always <= 31
 }
 
 impl TryFrom<raw::Entry> for Invoice {
