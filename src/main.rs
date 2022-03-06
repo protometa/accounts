@@ -107,11 +107,15 @@ async fn main() -> Result<()> {
             }
         } else if matches.subcommand_matches("payable").is_some() {
             let payables = ledger.payable().await?;
+            let mut payables: Vec<_> = payables.iter().collect();
+            payables.sort_by_key(|x| x.0);
             payables.iter().for_each(|(account, amount)| {
                 println!("{:25} | {}", account, amount);
             });
         } else if matches.subcommand_matches("receivable").is_some() {
             let receivables = ledger.receivable().await?;
+            let mut receivables: Vec<_> = receivables.iter().collect();
+            receivables.sort_by_key(|x| x.0);
             receivables.iter().for_each(|(account, amount)| {
                 println!("{:25} | {}", account, amount);
             });
