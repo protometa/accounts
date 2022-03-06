@@ -1,13 +1,13 @@
 // use accounts;
 use accounts::{chart_of_accounts::ChartOfAccounts, *};
 use anyhow::Result;
-use clap::{App, Arg};
+use clap::{Arg, Command};
 use futures::stream::TryStreamExt;
 use std::fs;
 
 #[async_std::main]
 async fn main() -> Result<()> {
-    let matches = App::new("Accounts")
+    let matches = Command::new("Accounts")
         .version("0.1.0")
         .author("Luke Nimtz <luke.nimtz@gmail.com>")
         .about("Simple accounting tools")
@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
             Arg::new("entries")
                 .short('e')
                 .long("entries")
-                .about("Sets directory or file of entries or '-' for stdin ")
+                .help("Sets directory or file of entries or '-' for stdin ")
                 .value_name("DIR")
                 .default_value("./")
                 .takes_value(true),
@@ -25,20 +25,20 @@ async fn main() -> Result<()> {
             Arg::new("party")
                 .short('p')
                 .long("party")
-                .about("Applies commands to entries filtered by party")
+                .help("Commandlies commands to entries filtered by party")
                 .value_name("PARTY")
                 .takes_value(true),
         )
-        .subcommand(App::new("journal").about("Shows journal"))
-        .subcommand(App::new("balances").about("Shows account balances"))
+        .subcommand(Command::new("journal").about("Shows journal"))
+        .subcommand(Command::new("balances").about("Shows account balances"))
         .subcommand(
-            App::new("report")
+            Command::new("report")
                 .about("Runs report given report spec and chart of accounts")
                 .arg(
                     Arg::new("report spec")
                         .short('s')
                         .long("spec")
-                        .about("The report spec file")
+                        .help("The report spec file")
                         .value_name("FILE")
                         .takes_value(true)
                         .required(true),
@@ -47,14 +47,14 @@ async fn main() -> Result<()> {
                     Arg::new("chart of accounts")
                         .short('c')
                         .long("chart")
-                        .about("The Chart of Accounts file")
+                        .help("The Chart of Accounts file")
                         .value_name("FILE")
                         .takes_value(true)
                         .required(true),
                 ),
         )
-        .subcommand(App::new("payable").about("Shows accounts payable balances by party"))
-        .subcommand(App::new("receivable").about("Shows accounts receivable balances by party"))
+        .subcommand(Command::new("payable").about("Shows accounts payable balances by party"))
+        .subcommand(Command::new("receivable").about("Shows accounts receivable balances by party"))
         .get_matches();
 
     if let Some(entries) = matches.value_of("entries") {
