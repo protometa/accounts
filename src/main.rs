@@ -2,6 +2,7 @@
 use accounts::{chart_of_accounts::ChartOfAccounts, *};
 use anyhow::Result;
 use clap::{Arg, Command};
+use entry::journal::JournalEntry;
 use futures::stream::TryStreamExt;
 use std::fs;
 
@@ -64,37 +65,34 @@ async fn main() -> Result<()> {
             Ledger::new(Some(entries))
         };
         if matches.subcommand_matches("journal").is_some() {
-            let mut journal_entries: Vec<journal_entry::JournalEntry> = ledger
-                .journal(matches.value_of("party").map(ToOwned::to_owned))
-                .try_collect()
-                .await?;
-            if let Some(party) = matches.value_of("party") {
-                journal_entries = journal_entries
-                    .into_iter()
-                    .filter(|entry| entry.3.clone().map_or(false, |p| p == party))
-                    .collect()
-            }
-            journal_entries.sort_by_key(|x| x.0);
+            let mut journal_entries: Vec<JournalEntry> = ledger.journal().try_collect().await?;
+            // if let Some(party) = matches.value_of("party") {
+            //     journal_entries = journal_entries
+            //         .into_iter()
+            //         .filter(|entry| entry.3.clone().map_or(false, |p| p == party))
+            //         .collect()
+            // }
+            journal_entries.sort_by_key(|x| x.date());
             journal_entries.into_iter().for_each(|entry| {
                 println!("{}", entry);
             });
-        } else if matches.subcommand_matches("balances").is_some() {
-            let balances = ledger
-                .balances(matches.value_of("party").map(ToOwned::to_owned))
-                .await?;
-            let total = balances.iter().fold(
-                journal_entry::JournalAmount::default(),
-                |mut acc, amount| {
-                    acc += *amount.1;
-                    acc
-                },
-            );
-            balances.iter().for_each(|(account, amount)| {
-                println!("{:25} | {}", account, amount);
-            });
-            if total != journal_entry::JournalAmount::default() {
-                println!("ERROR                     | {}", total);
-            }
+        // } else if matches.subcommand_matches("balances").is_some() {
+        //     let balances = ledger
+        //         .balances(matches.value_of("party").map(ToOwned::to_owned))
+        //         .await?;
+        //     let total = balances.iter().fold(
+        //         journal_entry::JournalAmount::default(),
+        //         |mut acc, amount| {
+        //             acc += *amount.1;
+        //             acc
+        //         },
+        //     );
+        //     balances.iter().for_each(|(account, amount)| {
+        //         println!("{:25} | {}", account, amount);
+        //     });
+        //     if total != journal_entry::JournalAmount::default() {
+        //         println!("ERROR                     | {}", total);
+        //     }
         } else if let Some(report) = matches.subcommand_matches("report") {
             if let (Some(spec), Some(chart)) = (
                 report.value_of("report spec"),
@@ -105,20 +103,20 @@ async fn main() -> Result<()> {
                 let report = ledger.run_report(&chart, &mut report).await?;
                 println!("{}", report)
             }
-        } else if matches.subcommand_matches("payable").is_some() {
-            let payables = ledger.payable().await?;
-            let mut payables: Vec<_> = payables.iter().collect();
-            payables.sort_by_key(|x| x.0);
-            payables.iter().for_each(|(account, amount)| {
-                println!("{:25} | {}", account, amount);
-            });
-        } else if matches.subcommand_matches("receivable").is_some() {
-            let receivables = ledger.receivable().await?;
-            let mut receivables: Vec<_> = receivables.iter().collect();
-            receivables.sort_by_key(|x| x.0);
-            receivables.iter().for_each(|(account, amount)| {
-                println!("{:25} | {}", account, amount);
-            });
+            // } else if matches.subcommand_matches("payable").is_some() {
+            //     let payables = ledger.payable().await?;
+            //     let mut payables: Vec<_> = payables.iter().collect();
+            //     payables.sort_by_key(|x| x.0);
+            //     payables.iter().for_each(|(account, amount)| {
+            //         println!("{:25} | {}", account, amount);
+            //     });
+            // } else if matches.subcommand_matches("receivable").is_some() {
+            //     let receivables = ledger.receivable().await?;
+            //     let mut receivables: Vec<_> = receivables.iter().collect();
+            //     receivables.sort_by_key(|x| x.0);
+            //     receivables.iter().for_each(|(account, amount)| {
+            //         println!("{:25} | {}", account, amount);
+            //     });
         }
     };
     Ok(())

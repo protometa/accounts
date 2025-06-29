@@ -1,44 +1,49 @@
 mod invoice;
+pub mod journal;
 mod payment;
 mod raw;
 
-use super::money::Money;
+use crate::account::Sign;
+use crate::money::Money;
 use anyhow::{Context, Error, Result};
 use chrono::prelude::*;
 use invoice::{default_monthly_rrule, Invoice};
+use journal::{JournalAmount, JournalEntry, JournalLine};
 use payment::*;
 use rrule::RRule;
 use std::convert::{TryFrom, TryInto};
 use std::iter::{self, Iterator};
 use std::str::FromStr;
+use JournalAmount::{Credit, Debit};
 
 /// This is a fully valid entry.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Entry {
     id: String,
-    date: EntryDate,
+    date: Date,
     memo: Option<String>,
-    body: EntryBody,
+    body: Body,
 }
 
-#[derive(Debug)]
-enum EntryDate {
+#[derive(Debug, Clone)]
+enum Date {
     SingleDate(NaiveDate),
     RRule(Box<RRule>),
 }
 
-impl EntryDate {
+impl Date {
     fn iter(&self) -> Box<dyn Iterator<Item = NaiveDate> + '_> {
         match self {
-            EntryDate::SingleDate(date) => Box::new(iter::once(*date)),
-            EntryDate::RRule(rrule) => Box::new(rrule.into_iter().map(|d| d.date().naive_utc())),
+            Date::SingleDate(date) => Box::new(iter::once(*date)),
+            Date::RRule(rrule) => Box::new(rrule.into_iter().map(|d| d.date().naive_utc())),
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub enum EntryBody {
-    JournalEntry(JournalEntryBody),
+pub enum Body {
+    // one Body::Journal may represent many JournalEntry as Entry.date is possibly RRule
+    Journal(Vec<JournalLine>),
     PaymentSent(Payment),
     PaymentReceived(Payment),
     PurchaseInvoice(Invoice),
@@ -52,8 +57,94 @@ impl Entry {
     pub fn dates(&self, until: NaiveDate) -> impl Iterator<Item = NaiveDate> + '_ {
         self.date.iter().take_while(move |d| *d <= until)
     }
-    pub fn body(&self) -> EntryBody {
+    pub fn body(&self) -> Body {
         self.body.clone()
+    }
+
+    pub fn to_journal_entries(&self, until: Option<NaiveDate>) -> Result<Vec<JournalEntry>> {
+        let until = until.unwrap_or({
+            let today = Local::today();
+            NaiveDate::from_ymd(today.year(), today.month(), today.day())
+        });
+        Ok(self
+            .dates(until)
+            .map(|date| match self.body() {
+                Body::PurchaseInvoice(invoice) => Ok(JournalEntry::new(
+                    &self.id,
+                    &date,
+                    self.memo.as_deref(),
+                    &Self::lines_from_invoice(invoice, Sign::Debit)?,
+                )),
+                Body::PaymentSent(payment) => Ok(JournalEntry::new(
+                    &self.id,
+                    &date,
+                    self.memo.as_deref(),
+                    &[
+                        JournalLine(payment.account, Credit(payment.amount)),
+                        JournalLine(String::from("Accounts Payable"), Debit(payment.amount)),
+                    ],
+                )),
+                Body::SaleInvoice(invoice) => Ok(JournalEntry::new(
+                    &self.id,
+                    &date,
+                    self.memo.as_deref(),
+                    &Self::lines_from_invoice(invoice, Sign::Credit)?,
+                )),
+                Body::PaymentReceived(payment) => Ok(JournalEntry::new(
+                    &self.id,
+                    &date,
+                    self.memo.as_deref(),
+                    &[
+                        JournalLine(payment.account, Debit(payment.amount)),
+                        JournalLine(String::from("Accounts Receivable"), Credit(payment.amount)),
+                    ],
+                )),
+                Body::Journal(lines) => Ok(JournalEntry::new(
+                    &self.id,
+                    &date,
+                    self.memo.as_deref(),
+                    &lines,
+                )),
+            })
+            .collect::<Result<Vec<JournalEntry>>>()?)
+    }
+
+    fn lines_from_invoice(invoice: Invoice, sign: Sign) -> Result<Vec<JournalLine>> {
+        let (amount_contructor, contra_amount_contructor): (
+            fn(Money) -> JournalAmount,
+            fn(Money) -> JournalAmount,
+        ) = match sign {
+            Sign::Debit => (Debit, Credit),
+            Sign::Credit => (Credit, Debit),
+        };
+        let mut entries = invoice
+            .items
+            .iter()
+            .map(|item| {
+                Ok(JournalLine(
+                    item.account.clone(),
+                    amount_contructor(item.total()?),
+                ))
+            })
+            .collect::<Result<Vec<JournalLine>>>()?; // TODO include inventory entries if tracking
+        let contra_amount = contra_amount_contructor(
+            invoice
+                .items
+                .iter()
+                .fold(Money::try_from(0.0), |acc, item| Ok(acc? + item.total()?))?,
+        );
+        let contra_account = match sign {
+            Sign::Debit => String::from("Accounts Payable"),
+            Sign::Credit => String::from("Accounts Receivable"),
+        };
+        let contra_entry = match invoice.payment {
+            None => JournalLine(contra_account, contra_amount),
+            // TODO this doesn't appear to take into account payment amount separate from
+            // contra_amount
+            Some(payment) => JournalLine(payment.account, contra_amount),
+        };
+        entries.push(contra_entry);
+        Ok(entries)
     }
 }
 
@@ -69,7 +160,7 @@ impl TryFrom<raw::Entry> for Entry {
             // rrule is parsed from optional `repeat` and `end` fields
             // treating string 'monthly' as generic monthly rrule
             date: raw_entry.repeat.clone().map_or::<Result<_>, _>(
-                Ok(EntryDate::SingleDate(date)),
+                Ok(Date::SingleDate(date)),
                 |rule_str| {
                     let ed = match rule_str.to_uppercase().as_str() {
                         // if simply MONTHLY use basic monthy rrule
@@ -79,25 +170,37 @@ impl TryFrom<raw::Entry> for Entry {
                         }))?,
                         rule_str => rule_str.parse()?,
                     };
-                    Ok(EntryDate::RRule(Box::new(ed)))
+                    Ok(Date::RRule(Box::new(ed)))
                 },
             )?,
             memo: raw_entry.memo.to_owned(),
             body: match raw_entry.r#type {
-                Some(ref s) if s == "Payment Sent" => {
-                    Ok(EntryBody::PaymentSent(raw_entry.try_into()?))
-                }
+                Some(ref s) if s == "Payment Sent" => Ok(Body::PaymentSent(raw_entry.try_into()?)),
                 Some(ref s) if s == "Payment Received" => {
-                    Ok(EntryBody::PaymentReceived(raw_entry.try_into()?))
+                    Ok(Body::PaymentReceived(raw_entry.try_into()?))
                 }
                 Some(ref s) if s == "Purchase Invoice" => {
-                    Ok(EntryBody::PurchaseInvoice(raw_entry.try_into()?))
+                    Ok(Body::PurchaseInvoice(raw_entry.try_into()?))
                 }
-                Some(ref s) if s == "Sales Invoice" => {
-                    Ok(EntryBody::SaleInvoice(raw_entry.try_into()?))
-                }
+                Some(ref s) if s == "Sales Invoice" => Ok(Body::SaleInvoice(raw_entry.try_into()?)),
                 Some(ref s) => Err(Error::msg(format!("{} not a valid Entry type", s))),
-                None => Ok(EntryBody::JournalEntry(raw_entry.try_into()?)),
+                None => {
+                    Ok(Body::Journal(
+                        raw_entry
+                            .debits
+                            .into_iter()
+                            .flatten()
+                            .map(|(account, amount)| {
+                                Ok(JournalLine(account, Debit(amount.parse()?)))
+                            })
+                            .chain(raw_entry.credits.into_iter().flatten().map(
+                                |(account, amount)| {
+                                    Ok(JournalLine(account, Credit(amount.parse()?)))
+                                },
+                            ))
+                            .collect::<Result<Vec<_>>>()?,
+                    ))
+                }
             }?,
         })
     }
@@ -125,41 +228,30 @@ impl FromStr for Entry {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct JournalEntryBody {
-    pub debits: Vec<(String, Money)>,
-    pub credits: Vec<(String, Money)>,
-}
+#[cfg(test)]
+mod entry_tests {
+    use super::*;
+    use std::fs::read_to_string;
 
-impl TryFrom<raw::Entry> for JournalEntryBody {
-    type Error = Error;
-
-    fn try_from(
-        raw::Entry {
-            debits, credits, ..
-        }: raw::Entry,
-    ) -> Result<Self> {
-        Ok(Self {
-            debits: debits
-                .context("Debits not listed on Journal Entry")?
-                .iter()
-                .map(|(account, amount)| {
-                    Ok((
-                        account.to_owned(),
-                        amount.to_owned().replace(",", "").parse()?,
-                    ))
-                })
-                .collect::<Result<Vec<(String, Money)>>>()?,
-            credits: credits
-                .context("Credits not listed on Journal Entry")?
-                .iter()
-                .map(|(account, amount)| {
-                    Ok((
-                        account.to_owned(),
-                        amount.to_owned().replace(",", "").parse()?,
-                    ))
-                })
-                .collect::<Result<Vec<(String, Money)>>>()?,
-        })
+    #[test]
+    fn parse_journal_entry() -> Result<()> {
+        let entry = read_to_string("./tests/fixtures/entries_flat/2020-01-02-Journal.yaml")?
+            .parse::<Entry>()?;
+        dbg!(&entry);
+        assert!(matches!(entry.date, Date::SingleDate(s) if s.to_string() == "2020-01-01"));
+        assert_eq!(entry.memo, Some("Initial Contribution".to_string()));
+        assert!(
+            matches!(entry.body.clone(), Body::Journal(lines) if lines.iter().eq([
+                JournalLine(
+                    "Bank".to_string(),
+                    Debit(15000.00.try_into()?),
+                ),
+                JournalLine(
+                    "Owner Contributions".to_string(),
+                    Credit(15000.00.try_into()?),
+                ),
+            ].iter()))
+        );
+        Ok(())
     }
 }

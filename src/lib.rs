@@ -1,7 +1,6 @@
 pub mod account;
 pub mod chart_of_accounts;
 pub mod entry;
-pub mod journal_entry;
 pub mod money;
 pub mod report;
 
@@ -11,10 +10,10 @@ use async_std::io::prelude::*;
 use async_std::io::{stdin, BufReader};
 use async_walkdir::{DirEntry, WalkDir};
 use chart_of_accounts::ChartOfAccounts;
+use entry::journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine};
 use entry::Entry;
 use futures::future::{self, Future};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
-use journal_entry::{JournalAccount, JournalAmount, JournalEntry};
 use lines_ext::LinesExt;
 use report::ReportNode;
 use std::borrow::ToOwned;
@@ -71,34 +70,31 @@ impl Ledger {
     }
 
     /// Convert own stream of `Entry`s into `JournalEntry`s
-    pub fn journal(&self, party: Option<String>) -> impl Stream<Item = Result<JournalEntry>> + '_ {
+    pub fn journal(&self) -> impl Stream<Item = Result<JournalEntry>> + '_ {
         self.entries()
-            .and_then(|entry| async {
-                Ok(stream::iter(JournalEntry::from_entry(entry, None)?).map(Ok))
-            })
+            .and_then(
+                |entry| async move { Ok(stream::iter(entry.to_journal_entries(None)?).map(Ok)) },
+            )
             .try_flatten()
-            .try_filter(move |entry| {
-                future::ready(
-                    party
-                        .clone()
-                        .map_or(true, |p| entry.3.clone().map_or(false, |party| p == party)),
-                )
-            })
     }
 
     /// Get balances for each account appearing in own stream of `JournalEntry`s
-    pub fn balances(&self, party: Option<String>) -> impl Future<Output = Result<Balances>> + '_ {
-        self.journal(party).try_fold(
-            HashMap::new(),
-            |mut acc, JournalEntry(_, account, amount, _)| async move {
-                acc.entry(account.clone())
-                    .and_modify(|total: &mut JournalAmount| {
-                        total.add_assign(amount);
-                    })
-                    .or_insert(amount);
-                Ok(acc)
-            },
-        )
+    pub fn balances(&self) -> impl Future<Output = Result<Balances>> + '_ {
+        // TODO: work on set of given JournalLines and use for payable/recievable too
+        self.journal()
+            .and_then(|entry| async move { Ok(stream::iter(entry.lines()).map(Ok)) })
+            .try_flatten()
+            .try_fold(
+                HashMap::new(),
+                |mut acc, JournalLine(account, amount)| async move {
+                    acc.entry(account.clone())
+                        .and_modify(|total: &mut JournalAmount| {
+                            total.add_assign(amount);
+                        })
+                        .or_insert(amount);
+                    Ok(acc)
+                },
+            )
     }
 
     /// Run report to get total breakdowns of own balances based on give `ChartOfAccounts` and report spec
@@ -107,7 +103,7 @@ impl Ledger {
         chart: &ChartOfAccounts,
         report: &'a mut ReportNode,
     ) -> Result<&'a mut ReportNode> {
-        self.balances(None)
+        self.balances()
             .await?
             .iter()
             .try_fold(report, |report, (account, balance)| {
@@ -118,39 +114,45 @@ impl Ledger {
             })
     }
 
-    pub fn payable(&self) -> impl Future<Output = Result<HashMap<String, JournalAmount>>> + '_ {
-        self.journal(None).try_fold(
-            HashMap::new(),
-            |mut acc, JournalEntry(_, account, amount, party)| async move {
-                if account == "Accounts Payable" {
-                    if let Some(party) = party {
-                        acc.entry(party)
-                            .and_modify(|total: &mut JournalAmount| {
-                                total.add_assign(amount);
-                            })
-                            .or_insert(amount);
-                    }
-                }
-                Ok(acc)
-            },
-        )
+    pub fn payable(&self)
+    // -> impl Future<Output = Result<HashMap<String, JournalAmount>>> + '_
+    {
+        unimplemented!("This function is not yet implemented");
+        // self.journal().try_fold(
+        //     HashMap::new(),
+        //     |mut acc, JournalEntry(_, account, amount, party)| async move {
+        //         if account == "Accounts Payable" {
+        //             if let Some(party) = party {
+        //                 acc.entry(party)
+        //                     .and_modify(|total: &mut JournalAmount| {
+        //                         total.add_assign(amount);
+        //                     })
+        //                     .or_insert(amount);
+        //             }
+        //         }
+        //         Ok(acc)
+        //     },
+        // )
     }
 
-    pub fn receivable(&self) -> impl Future<Output = Result<HashMap<String, JournalAmount>>> + '_ {
-        self.journal(None).try_fold(
-            HashMap::new(),
-            |mut acc, JournalEntry(_, account, amount, party)| async move {
-                if account == "Accounts Receivable" {
-                    if let Some(party) = party {
-                        acc.entry(party)
-                            .and_modify(|total: &mut JournalAmount| {
-                                total.add_assign(amount);
-                            })
-                            .or_insert(amount);
-                    }
-                }
-                Ok(acc)
-            },
-        )
+    pub fn receivable(&self)
+    // -> impl Future<Output = Result<HashMap<String, JournalAmount>>> + '_
+    {
+        unimplemented!("This function is not yet implemented");
+        // self.journal().try_fold(
+        //     HashMap::new(),
+        //     |mut acc, JournalEntry(_, account, amount, party)| async move {
+        //         if account == "Accounts Receivable" {
+        //             if let Some(party) = party {
+        //                 acc.entry(party)
+        //                     .and_modify(|total: &mut JournalAmount| {
+        //                         total.add_assign(amount);
+        //                     })
+        //                     .or_insert(amount);
+        //             }
+        //         }
+        //         Ok(acc)
+        //     },
+        // )
     }
 }

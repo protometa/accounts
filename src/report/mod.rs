@@ -1,13 +1,15 @@
 #![allow(clippy::new_without_default)]
 mod raw;
 
-use crate::account::{
-    Account,
-    Sign::{self, *},
-    Tag,
-    Type::{self, *},
+use crate::{
+    account::{
+        Account,
+        Sign::{self, *},
+        Tag,
+        Type::{self, *},
+    },
+    entry::journal::JournalAmount,
 };
-use crate::journal_entry::JournalAmount;
 
 use anyhow::{Context, Error, Result};
 use async_std::fs;
