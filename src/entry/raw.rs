@@ -1,14 +1,18 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Raw struct deserilized from yaml
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Entry {
     pub id: Option<String>, // if not specified will use filename
-    pub r#type: String,
+    pub r#type: Option<String>,
     pub date: String,
-    pub party: String,
-    pub account: String,
     pub memo: Option<String>,
+    pub debits: Option<HashMap<String, String>>,
+    pub credits: Option<HashMap<String, String>>,
+    pub party: Option<String>,
+    pub account: Option<String>,
     pub amount: Option<f64>,
     pub items: Option<Vec<Item>>,
     pub extras: Option<Vec<Extra>>,

@@ -1,0 +1,7 @@
+---
+date: 2020-01-01
+memo: Initial Contribution
+debits:
+  Bank: 15,000
+credits:
+  Owner Contributions: 15,000

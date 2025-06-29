@@ -41,6 +41,14 @@ impl fmt::Display for Money {
     }
 }
 
+impl FromStr for Money {
+    type Err = Error; // TODO custom parse error?
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.replace(",", "").replace("$", "").parse()?))
+    }
+}
+
 impl Add for Money {
     type Output = Money;
 
