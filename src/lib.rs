@@ -5,7 +5,7 @@ pub mod money;
 pub mod report;
 
 use anyhow::{Error, Result};
-use async_std::fs::File;
+use async_std::fs::{self, File};
 use async_std::io::prelude::*;
 use async_std::io::{stdin, BufReader};
 use async_walkdir::{DirEntry, WalkDir};
@@ -14,15 +14,17 @@ use entry::journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine};
 use entry::Entry;
 use futures::future::{self, Future};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use futures::FutureExt;
 use lines_ext::LinesExt;
 use report::ReportNode;
 use std::borrow::ToOwned;
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::ops::AddAssign;
+use std::path::Path;
 
 pub struct Ledger {
-    dir: Option<String>,
+    path: Option<String>,
 }
 
 type Balances = HashMap<JournalAccount, JournalAmount>;
@@ -30,12 +32,12 @@ type Balances = HashMap<JournalAccount, JournalAmount>;
 impl Ledger {
     pub fn new(dir: Option<&str>) -> Self {
         Ledger {
-            dir: dir.map(ToOwned::to_owned),
+            path: dir.map(ToOwned::to_owned),
         }
     }
 
     /// Reads an entire dir of files by line
-    fn dir_lines(dir: String) -> impl Stream<Item = std::io::Result<String>> {
+    fn dir_lines(dir: &str) -> impl Stream<Item = std::io::Result<String>> {
         WalkDir::new(dir)
             .try_filter_map(|dir_entry: DirEntry| async move {
                 let path = dir_entry.path();
@@ -52,10 +54,39 @@ impl Ledger {
             .try_flatten()
     }
 
+    async fn dir_or_file_lines(
+        &self,
+        pathstr: String,
+    ) -> std::io::Result<impl Stream<Item = std::io::Result<String>> + '_> {
+        let path = Path::new(&pathstr);
+        if path.exists() {
+            let metadata = fs::metadata(path).await?;
+            if metadata.is_file() {
+                let file = File::open(&pathstr).await?;
+                Ok(BufReader::new(file).lines().left_stream())
+            } else if metadata.is_dir() {
+                Ok(Self::dir_lines(&pathstr).right_stream())
+            } else {
+                Err(std::io::Error::new(
+                    ErrorKind::InvalidInput,
+                    "The path is neither a file nor a directory.",
+                ))
+            }
+        } else {
+            Err(std::io::Error::new(
+                ErrorKind::NotFound,
+                "The path does not exist.",
+            ))
+        }
+    }
+
     /// Reads lines of self.dir or stdin if None
     fn lines(&self) -> impl Stream<Item = std::io::Result<String>> + '_ {
-        if let Some(dir) = self.dir.clone() {
-            Self::dir_lines(dir).left_stream()
+        if let Some(pathstr) = self.path.clone() {
+            self.dir_or_file_lines(pathstr)
+                .into_stream()
+                .try_flatten()
+                .left_stream()
         } else {
             BufReader::new(stdin()).lines().right_stream()
         }
