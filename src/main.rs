@@ -1,6 +1,7 @@
 // use accounts;
 use accounts::{chart_of_accounts::ChartOfAccounts, *};
 use anyhow::Result;
+use bank_txs::{BankTxs, ReconciliationRules};
 use clap::{Arg, Command};
 use entry::journal::JournalEntry;
 use futures::stream::TryStreamExt;
@@ -56,6 +57,28 @@ async fn main() -> Result<()> {
         )
         .subcommand(Command::new("payable").about("Shows accounts payable balances by party"))
         .subcommand(Command::new("receivable").about("Shows accounts receivable balances by party"))
+        .subcommand(
+            Command::new("reconcile")
+                .about("Reconcile entries with bank transactions")
+                .arg(
+                    Arg::new("bank txs")
+                        .short('b')
+                        .long("bank-txs")
+                        .help("Bank transactions file in normalized pipe delimited format")
+                        .value_name("FILE")
+                        .takes_value(true)
+                        .required(true),
+                )
+                .arg(
+                    Arg::new("rules")
+                        .short('r')
+                        .long("rules")
+                        .help("Rules spec file for matching txs")
+                        .value_name("FILE")
+                        .takes_value(true)
+                        .required(false),
+                ),
+        )
         .get_matches();
 
     if let Some(entries) = matches.value_of("entries") {
@@ -65,6 +88,8 @@ async fn main() -> Result<()> {
             Ledger::new(Some(entries))
         };
         if matches.subcommand_matches("journal").is_some() {
+            // TODO walk dir sorted and add check to assert date order and process this iteratively instead of collecting
+            // TODO solve the problem of emitting recurring entries in order
             let mut journal_entries: Vec<JournalEntry> = ledger.journal().try_collect().await?;
             // if let Some(party) = matches.value_of("party") {
             //     journal_entries = journal_entries
@@ -117,6 +142,16 @@ async fn main() -> Result<()> {
             //     receivables.iter().for_each(|(account, amount)| {
             //         println!("{:25} | {}", account, amount);
             //     });
+        } else if let Some(reconcile) = matches.subcommand_matches("reconcile") {
+            if let Some(txs) = reconcile.value_of("bank txs") {
+                let txs = BankTxs::from_file(txs).await?;
+                // let rules = if let Some(rules) = reconcile.value_of("rules") {
+                //     ReconciliationRules::from_file(rules)
+                // } else {
+                //     ReconciliationRules::new()
+                // };
+                ledger.reconcile(txs, ReconciliationRules())
+            }
         }
     };
     Ok(())

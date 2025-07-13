@@ -1,4 +1,3 @@
-#![allow(clippy::new_without_default)]
 mod raw;
 
 use self::Sign::*;
@@ -9,19 +8,14 @@ use std::{
     str::FromStr,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Type {
     Asset,
     Liability,
     Expense,
     Revenue,
+    #[default]
     Equity,
-}
-
-impl Default for Type {
-    fn default() -> Self {
-        Type::Equity
-    }
 }
 
 impl FromStr for Type {
@@ -60,11 +54,9 @@ impl Tag {
 
 #[macro_export]
 macro_rules! tags {
-    ($($tag:expr),*) => {{
-        let mut v = Vec::new();
-        $(v.push(Tag::new($tag));)*
-        v.into_iter().collect::<Result<Vec<_>>>()
-    }};
+    ($($tag:expr),*) => {
+        anyhow::Ok(vec![$(Tag::new($tag)?,)*])
+    };
 }
 
 #[derive(Debug, Default)]

@@ -1,4 +1,5 @@
 pub mod account;
+pub mod bank_txs;
 pub mod chart_of_accounts;
 pub mod entry;
 mod lines;
@@ -6,6 +7,7 @@ pub mod money;
 pub mod report;
 
 use anyhow::{Error, Result};
+use bank_txs::{BankTxs, ReconciliationRules};
 use chart_of_accounts::ChartOfAccounts;
 use entry::journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine};
 use entry::Entry;
@@ -124,5 +126,16 @@ impl Ledger {
         //         Ok(acc)
         //     },
         // )
+    }
+
+    pub fn reconcile(&self, txs: BankTxs, rules: ReconciliationRules) {
+        dbg!(txs);
+        // self.journal().for_each(|entry: JournalEntry| {
+        //     // try to match each entry
+        //     // if !txs.match_and_rm(entry) {
+        //     //     // emit entry not found in bank for reconcilliation report
+        //     // }
+        //     // emit unmatch bank txs as new entries
+        // });
     }
 }
