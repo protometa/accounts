@@ -150,7 +150,8 @@ async fn main() -> Result<()> {
                 // } else {
                 //     ReconciliationRules::new()
                 // };
-                ledger.reconcile(txs, ReconciliationRules())
+
+                // ledger.reconcile(txs, ReconciliationRules())
             }
         }
     };

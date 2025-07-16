@@ -1,14 +1,17 @@
 use crate::{
-    entry::journal::{JournalAccount, JournalAmount},
+    entry::{
+        journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine},
+        Entry,
+    },
     money::Money,
 };
 use anyhow::{anyhow, Context, Error, Result};
-use async_std::fs::File;
 use async_std::io::BufReader;
 use async_std::prelude::*;
+use async_std::{fs::File, path::Iter};
 use chrono::NaiveDate;
 use futures::{future, TryStreamExt};
-use std::str::FromStr;
+use std::{borrow::Borrow, collections::HashMap, str::FromStr, thread::AccessError};
 
 #[derive(Debug, PartialEq)]
 struct BankTx {
@@ -65,10 +68,14 @@ impl FromStr for BankTx {
 }
 
 #[derive(Debug)]
-pub struct BankTxs(Vec<BankTx>);
+pub struct BankTxs {
+    pub txs: Vec<BankTx>,
+    pub rules: ReconciliationRules,
+}
 
 impl BankTxs {
     pub async fn from_file(file: &str) -> Result<Self> {
+        // TODO accept txs as dir and accept rules file
         let file = File::open(file).await?;
         let txs: Vec<BankTx> = BufReader::new(file)
             .lines()
@@ -76,18 +83,68 @@ impl BankTxs {
             .and_then(|line| future::ready(line.parse()))
             .try_collect()
             .await?;
-        Ok(Self(txs))
+        Ok(Self {
+            txs,
+            rules: ReconciliationRules::default(),
+        })
+    }
+
+    // // get max date of txs
+    // let until = self.0.iter().fold(None, |date, tx| {
+    //     if let Some(date) = date {
+    //         if tx.date > date {
+    //             return Some(tx.date);
+    //         }
+    //     }
+    //     date
+    // });
+
+    /// match given entry to txs and remove from set of txs
+    pub fn match_and_rm(&mut self, entry: JournalEntry) -> Option<BankTx> {
+        if self.txs.is_empty() {
+            return None;
+        }
+        if let Some(i) = self.txs.iter().position(|tx| {
+            tx.date == entry.clone().date()
+                && entry.lines().iter().any(|JournalLine(account, amount)| {
+                    self.rules
+                        .corresponding_account(&tx.account)
+                        .map(|ca| &ca == account && &tx.amount.invert() == amount)
+                        .unwrap_or(false)
+                })
+        }) {
+            return Some(self.txs.swap_remove(i));
+        };
+        None
+    }
+
+    /// After matching and removing txs, used to generate new entries from remaining txs
+    pub fn generate_entries(&mut self) {
+        todo!()
+        // rules to decide to make it payment entry or journal entry
+        // if payment entry, rules for party from memo, date, amount
+        // if journal entry, rules for counter account from memo, date, amount
+        // templating of memo
     }
 }
 
-pub struct ReconciliationRules();
+#[derive(Debug, Default)]
+pub struct ReconciliationRules {
+    account_map: HashMap<JournalAccount, JournalAccount>,
+}
+
+impl ReconciliationRules {
+    fn corresponding_account(&self, account: &JournalAccount) -> Option<JournalAccount> {
+        self.account_map.get(account).cloned()
+    }
+}
 
 #[cfg(test)]
 mod bank_txs_tests {
-    use anyhow::Result;
-    use std::convert::TryInto;
-
     use super::*;
+    use anyhow::Result;
+    use indoc::indoc;
+    use std::{collections::HashMap, convert::TryInto};
 
     #[test]
     fn bank_tx_parse() -> Result<()> {
@@ -127,4 +184,64 @@ mod bank_txs_tests {
         );
         Ok(())
     }
+
+    // TODO test journal entry
+
+    #[test]
+    fn match_payment_sent() -> Result<()> {
+        let mut txs = BankTxs {
+            txs: vec!["2025-03-06 | X0 |  60.50 |        | Electrical".parse()?],
+            rules: ReconciliationRules {
+                account_map: HashMap::from([("X0".to_string(), "Bank Checking".to_string())]),
+            },
+        };
+        let matched = txs.match_and_rm(
+            indoc! {"
+                type: Payment Sent
+                date: 2025-03-06
+                party: ACME Electrical 
+                memo: Operating Expenses
+                account: Bank Checking
+                amount: 60.50
+            "}
+            .parse::<Entry>()?
+            .to_journal_entries(None)?[0]
+                .clone(),
+        );
+        dbg!(&matched);
+        assert!(matched.is_some());
+        assert!(txs.txs.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn match_payment_received() -> Result<()> {
+        let mut txs = BankTxs {
+            txs: vec!["2025-03-07 | X0 |        | 310.00 | POS deposit".parse()?],
+            rules: ReconciliationRules {
+                account_map: HashMap::from([("X0".to_string(), "Bank Checking".to_string())]),
+            },
+        };
+        let matched = txs.match_and_rm(
+            indoc! {"
+                type: Payment Received
+                date: 2025-03-07
+                party: ACME POS
+                account: Bank Checking
+                amount: 310.00
+            "}
+            .parse::<Entry>()?
+            .to_journal_entries(None)?[0]
+                .clone(),
+        );
+        dbg!(&matched);
+        assert!(matched.is_some());
+        assert!(txs.txs.is_empty());
+        Ok(())
+    }
+
+    // TODO test invoices with payment
+
+    // TODO implement inexact dates
+    // TODO test entry generation from rules
 }

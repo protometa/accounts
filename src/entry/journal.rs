@@ -32,6 +32,12 @@ impl JournalAmount {
     pub fn credit(n: f64) -> anyhow::Result<Self> {
         Ok(Credit(n.try_into()?))
     }
+    pub fn invert(&self) -> Self {
+        match self {
+            Debit(money) => Credit(*money),
+            Credit(money) => Debit(*money),
+        }
+    }
 }
 
 impl fmt::Display for JournalAmount {
@@ -93,12 +99,16 @@ impl JournalEntry {
         }
     }
 
-    pub fn lines(&self) -> Vec<JournalLine> {
-        self.lines.clone()
+    pub fn date(&self) -> NaiveDate {
+        self.date
     }
 
-    pub fn date(&self) -> NaiveDate {
-        self.date.clone()
+    pub fn memo(&self) -> Option<String> {
+        self.memo.clone()
+    }
+
+    pub fn lines(&self) -> Vec<JournalLine> {
+        self.lines.clone()
     }
 }
 

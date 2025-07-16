@@ -130,7 +130,7 @@ impl Ledger {
 
     pub fn reconcile(&self, txs: BankTxs, rules: ReconciliationRules) {
         dbg!(txs);
-        // self.journal().for_each(|entry: JournalEntry| {
+        // self.entries().for_each(|entry: Entry| {
         //     // try to match each entry
         //     // if !txs.match_and_rm(entry) {
         //     //     // emit entry not found in bank for reconcilliation report

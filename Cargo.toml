@@ -18,6 +18,7 @@ rrule = "0.7.0"
 chrono-tz = "0.6.1"
 clap = "3.0.0-beta.2"
 lines-ext = { git = "https://github.com/protometa/lines-ext" }
+indoc = "2.0.6"
 
 [dev-dependencies]
 itertools = "0.10.0"

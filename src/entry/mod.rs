@@ -66,8 +66,7 @@ impl Entry {
             let today = Local::today();
             NaiveDate::from_ymd(today.year(), today.month(), today.day())
         });
-        Ok(self
-            .dates(until)
+        self.dates(until)
             .map(|date| match self.body() {
                 Body::PurchaseInvoice(invoice) => Ok(JournalEntry::new(
                     &self.id,
@@ -106,7 +105,7 @@ impl Entry {
                     &lines,
                 )),
             })
-            .collect::<Result<Vec<JournalEntry>>>()?)
+            .collect::<Result<Vec<JournalEntry>>>()
     }
 
     fn lines_from_invoice(invoice: Invoice, sign: Sign) -> Result<Vec<JournalLine>> {
@@ -231,6 +230,8 @@ impl FromStr for Entry {
 #[cfg(test)]
 mod entry_tests {
     use super::*;
+    use indoc::indoc;
+    use itertools::assert_equal;
     use std::fs::read_to_string;
 
     #[test]
@@ -252,6 +253,31 @@ mod entry_tests {
                 ),
             ].iter()))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn to_journal_entries_basic() -> Result<()> {
+        let entry: Entry = indoc! {"
+            type: Payment Sent
+            date: 2025-03-06
+            party: ACME Electrical 
+            memo: Operating Expenses
+            account: Bank Checking
+            amount: 60.50
+        "}
+        .parse()?;
+        // let jes = entry.to_journal_entries(Some("2025-04-01".parse()?))?;
+        let jes = entry.to_journal_entries(None)?;
+        let entry = jes.first().context("No journal entries")?;
+        dbg!(entry);
+        assert_eq!(entry.date().to_string(), "2025-03-06");
+        assert_eq!(entry.memo(), Some("Operating Expenses".to_string()));
+        assert!(entry.lines().iter().eq([
+            JournalLine("Bank Checking".to_string(), Credit(60.50.try_into()?),),
+            JournalLine("Accounts Payable".to_string(), Debit(60.50.try_into()?),),
+        ]
+        .iter()));
         Ok(())
     }
 }
