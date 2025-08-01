@@ -1,24 +1,59 @@
+pub mod reconciliation_rules;
 use crate::{
-    entry::{
-        journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine},
-        Entry,
+    entry::journal::{
+        JournalAccount,
+        JournalAmount::{self, Credit, Debit},
+        JournalEntry,
     },
     money::Money,
 };
 use anyhow::{anyhow, Context, Error, Result};
+use async_std::fs::File;
 use async_std::io::BufReader;
 use async_std::prelude::*;
-use async_std::{fs::File, path::Iter};
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use futures::{future, TryStreamExt};
-use std::{borrow::Borrow, collections::HashMap, str::FromStr, thread::AccessError};
+use reconciliation_rules::ReconciliationRules;
+use serde::{
+    ser::{self, SerializeMap},
+    Serialize, Serializer,
+};
+use std::{convert::TryInto, str::FromStr};
 
-#[derive(Debug, PartialEq)]
-struct BankTx {
+#[derive(Debug, PartialEq, Clone)]
+pub struct BankTx {
     date: NaiveDate,
     account: JournalAccount,
     amount: JournalAmount,
     memo: String,
+}
+
+/// Implement Serialize into various fields for matching against rules
+impl Serialize for BankTx {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use ser::Error;
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("date", &self.date.to_string())?;
+        map.serialize_entry("year", &self.date.year())?;
+        map.serialize_entry("month", &self.date.month())?;
+        map.serialize_entry("day", &self.date.day())?;
+        map.serialize_entry("memo", &self.memo)?;
+        map.serialize_entry("account", &self.account)?;
+        match self.amount {
+            Credit(credit) => {
+                let m: f64 = credit.0.try_into().map_err(S::Error::custom)?;
+                map.serialize_entry("credit", &m)?;
+            }
+            Debit(debit) => {
+                let m: f64 = debit.0.try_into().map_err(S::Error::custom)?;
+                map.serialize_entry("debit", &m)?;
+            }
+        }
+        map.end()
+    }
 }
 
 impl FromStr for BankTx {
@@ -101,50 +136,35 @@ impl BankTxs {
 
     /// match given entry to txs and remove from set of txs
     pub fn match_and_rm(&mut self, entry: JournalEntry) -> Option<BankTx> {
+        // TODO handle case where entry matches bank account but not found
         if self.txs.is_empty() {
             return None;
         }
         if let Some(i) = self.txs.iter().position(|tx| {
-            tx.date == entry.clone().date()
-                && entry.lines().iter().any(|JournalLine(account, amount)| {
-                    self.rules
-                        .corresponding_account(&tx.account)
-                        .map(|ca| &ca == account && &tx.amount.invert() == amount)
-                        .unwrap_or(false)
-                })
+            self.rules
+                .apply(tx)
+                .is_ok_and(|g| g.match_entry(&entry).is_ok_and(|m| m))
         }) {
             return Some(self.txs.swap_remove(i));
         };
         None
     }
 
-    /// After matching and removing txs, used to generate new entries from remaining txs
+    /// This will generate new entries from remaining txs after matching and removing
     pub fn generate_entries(&mut self) {
+        // self.txs.iter().map(|tx| self.rules.apply(tx)?.generate());
         todo!()
-        // rules to decide to make it payment entry or journal entry
-        // if payment entry, rules for party from memo, date, amount
-        // if journal entry, rules for counter account from memo, date, amount
-        // templating of memo
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct ReconciliationRules {
-    account_map: HashMap<JournalAccount, JournalAccount>,
-}
-
-impl ReconciliationRules {
-    fn corresponding_account(&self, account: &JournalAccount) -> Option<JournalAccount> {
-        self.account_map.get(account).cloned()
     }
 }
 
 #[cfg(test)]
 mod bank_txs_tests {
+    use crate::entry::Entry;
+
     use super::*;
     use anyhow::Result;
     use indoc::indoc;
-    use std::{collections::HashMap, convert::TryInto};
+    use std::convert::TryInto;
 
     #[test]
     fn bank_tx_parse() -> Result<()> {
@@ -191,23 +211,27 @@ mod bank_txs_tests {
     fn match_payment_sent() -> Result<()> {
         let mut txs = BankTxs {
             txs: vec!["2025-03-06 | X0 |  60.50 |        | Electrical".parse()?],
-            rules: ReconciliationRules {
-                account_map: HashMap::from([("X0".to_string(), "Bank Checking".to_string())]),
-            },
+            rules: indoc! {r#"
+                rule: [eq, account, "XXX000"]
+                values:
+                  bank_account: "Bank Checking"
+            "#}
+            .parse()?,
         };
-        let matched = txs.match_and_rm(
-            indoc! {"
-                type: Payment Sent
-                date: 2025-03-06
-                party: ACME Electrical 
-                memo: Operating Expenses
-                account: Bank Checking
-                amount: 60.50
-            "}
-            .parse::<Entry>()?
-            .to_journal_entries(None)?[0]
-                .clone(),
-        );
+        let entry = indoc! {"
+            type: Payment Sent
+            date: 2025-03-06
+            party: ACME Electrical 
+            memo: Operating Expenses
+            account: Bank Checking
+            amount: 60.50
+        "}
+        .parse::<Entry>()?
+        .to_journal_entries(None)?[0]
+            .clone();
+
+        let matched = txs.match_and_rm(entry);
+
         dbg!(&matched);
         assert!(matched.is_some());
         assert!(txs.txs.is_empty());
@@ -218,9 +242,12 @@ mod bank_txs_tests {
     fn match_payment_received() -> Result<()> {
         let mut txs = BankTxs {
             txs: vec!["2025-03-07 | X0 |        | 310.00 | POS deposit".parse()?],
-            rules: ReconciliationRules {
-                account_map: HashMap::from([("X0".to_string(), "Bank Checking".to_string())]),
-            },
+            rules: indoc! {r#"
+                rule: [eq, account, "XXX000"]
+                values:
+                  bank_account: Bank Checking
+            "#}
+            .parse()?,
         };
         let matched = txs.match_and_rm(
             indoc! {"
@@ -240,8 +267,62 @@ mod bank_txs_tests {
         Ok(())
     }
 
+    // TODO test not matching on various fields
+
     // TODO test invoices with payment
 
     // TODO implement inexact dates
     // TODO test entry generation from rules
+
+    #[test]
+    #[ignore]
+    fn generate_payment_received() -> Result<()> {
+        let mut txs = BankTxs {
+            txs: vec!["2025-03-07 | X0 |        | 310.00 | POS deposit".parse()?],
+            rules: indoc! {r#"
+                rule: [eq, account, "XXX000"]
+                values:
+                  bank_account: Bank Checking
+                ---
+                rule: [contains, memo, "POS deposit"]
+                entry:
+                  type: Payment Received
+                  party: ACME POS
+            "#}
+            .parse()?,
+        };
+        let entries = txs.generate_entries();
+
+        todo!();
+
+        Ok(())
+    }
+
+    // indoc! {r#"
+    //     rule: [is account "XXX000"]
+    //     values:
+    //       bank_account: Bank Checking
+    //     ---
+    //     rule: [contains, memo, "POS deposit"]]
+    //     values:
+    //       offset_account: Sales
+    // "#}
+
+    // rule: [is account "XXX000"]
+    // values:
+    //   bank_account: Business Checking
+    // # rules that don't have entry field are pass through
+    // # and generate values for all txs that reach them
+    // ---
+    // rules: # singular or plural combined with AND
+    //   - [has, debit] # not strictly necessary as memo is sufficient
+    //   - [contains, memo, "Transfer From 8230"]]
+    // values: # can be used in entry interpolation
+    //   month: [month, date]
+    //   memo_acc: [last [split, memo]]
+    //   offset_account: Luke contributions # special values to auto build entry
+    // entry: # missing fields inferred, output validated
+    //   memo: "Luke {month} Contribution ({memo_acc})"
+    //   credits:
+    //     Luke contributions: "{amount}"
 }

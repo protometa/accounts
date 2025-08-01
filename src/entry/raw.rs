@@ -1,6 +1,5 @@
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Raw struct deserilized from yaml
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
