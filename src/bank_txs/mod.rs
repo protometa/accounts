@@ -37,21 +37,28 @@ impl Serialize for BankTx {
         use ser::Error;
         let mut map = serializer.serialize_map(None)?;
         map.serialize_entry("date", &self.date.to_string())?;
+        // special date component fields
         map.serialize_entry("year", &self.date.year())?;
         map.serialize_entry("month", &self.date.month())?;
         map.serialize_entry("day", &self.date.day())?;
+
         map.serialize_entry("memo", &self.memo)?;
         map.serialize_entry("account", &self.account)?;
+
+        let amount: f64 = match self.amount {
+            Credit(credit) => credit.0.try_into().map_err(S::Error::custom)?,
+            Debit(debit) => debit.0.try_into().map_err(S::Error::custom)?,
+        };
         match self.amount {
-            Credit(credit) => {
-                let m: f64 = credit.0.try_into().map_err(S::Error::custom)?;
-                map.serialize_entry("credit", &m)?;
+            Credit(_) => {
+                map.serialize_entry("credit", &amount)?;
             }
-            Debit(debit) => {
-                let m: f64 = debit.0.try_into().map_err(S::Error::custom)?;
-                map.serialize_entry("debit", &m)?;
+            Debit(_) => {
+                map.serialize_entry("debit", &amount)?;
             }
-        }
+        };
+        // special field which is normalized amount of either credit or debit
+        map.serialize_entry("amount", &amount)?;
         map.end()
     }
 }
@@ -159,9 +166,8 @@ impl BankTxs {
 
 #[cfg(test)]
 mod bank_txs_tests {
-    use crate::entry::Entry;
-
     use super::*;
+    use crate::entry::Entry;
     use anyhow::Result;
     use indoc::indoc;
     use std::convert::TryInto;
@@ -210,9 +216,9 @@ mod bank_txs_tests {
     #[test]
     fn match_payment_sent() -> Result<()> {
         let mut txs = BankTxs {
-            txs: vec!["2025-03-06 | X0 |  60.50 |        | Electrical".parse()?],
+            txs: vec!["2025-03-06 | XX00 |  60.50 |        | Electrical".parse()?],
             rules: indoc! {r#"
-                rule: [eq, account, "XXX000"]
+                rule: [eq, account, "XX00"]
                 values:
                   bank_account: "Bank Checking"
             "#}
@@ -241,9 +247,9 @@ mod bank_txs_tests {
     #[test]
     fn match_payment_received() -> Result<()> {
         let mut txs = BankTxs {
-            txs: vec!["2025-03-07 | X0 |        | 310.00 | POS deposit".parse()?],
+            txs: vec!["2025-03-07 | XX00 |        | 310.00 | POS deposit".parse()?],
             rules: indoc! {r#"
-                rule: [eq, account, "XXX000"]
+                rule: [eq, account, "XX00"]
                 values:
                   bank_account: Bank Checking
             "#}
@@ -279,6 +285,7 @@ mod bank_txs_tests {
     fn generate_payment_received() -> Result<()> {
         let mut txs = BankTxs {
             txs: vec!["2025-03-07 | X0 |        | 310.00 | POS deposit".parse()?],
+            // TODO payments should probably be default with received/sent variations based on bank account and debit/credit
             rules: indoc! {r#"
                 rule: [eq, account, "XXX000"]
                 values:
@@ -297,32 +304,4 @@ mod bank_txs_tests {
 
         Ok(())
     }
-
-    // indoc! {r#"
-    //     rule: [is account "XXX000"]
-    //     values:
-    //       bank_account: Bank Checking
-    //     ---
-    //     rule: [contains, memo, "POS deposit"]]
-    //     values:
-    //       offset_account: Sales
-    // "#}
-
-    // rule: [is account "XXX000"]
-    // values:
-    //   bank_account: Business Checking
-    // # rules that don't have entry field are pass through
-    // # and generate values for all txs that reach them
-    // ---
-    // rules: # singular or plural combined with AND
-    //   - [has, debit] # not strictly necessary as memo is sufficient
-    //   - [contains, memo, "Transfer From 8230"]]
-    // values: # can be used in entry interpolation
-    //   month: [month, date]
-    //   memo_acc: [last [split, memo]]
-    //   offset_account: Luke contributions # special values to auto build entry
-    // entry: # missing fields inferred, output validated
-    //   memo: "Luke {month} Contribution ({memo_acc})"
-    //   credits:
-    //     Luke contributions: "{amount}"
 }

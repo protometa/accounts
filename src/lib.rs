@@ -20,6 +20,7 @@ use std::borrow::ToOwned;
 use std::collections::HashMap;
 use std::ops::AddAssign;
 
+// TODO explore using pinned stream instead of attaching everything to this struct
 pub struct Ledger {
     path: Option<String>,
 }

@@ -1,7 +1,7 @@
 use super::BankTx;
 use crate::entry::{journal::JournalEntry, Entry};
 use anyhow::{anyhow, Context, Error, Ok, Result};
-use rule::{json, rule::Expr, Rule};
+use rule::{arg::Arg, json, rule::Expr, Rule};
 use serde::{Deserialize, Serialize};
 // use serde_yaml::Value;
 use serde_json::{Map, Value};
@@ -16,14 +16,15 @@ use std::{
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
 pub struct RawReconciliationRule {
     rule: Value,
-    values: HashMap<String, Value>,
+    values: Option<HashMap<String, Value>>,
     entry: Option<Map<String, Value>>,
 }
 
+// TODO perhaps abreviate this to RecRule
 #[derive(Debug)]
 pub struct ReconciliationRule {
     rule: Rule,
-    values: HashMap<String, Expr>,
+    values: HashMap<String, Arg>,
     template: Map<String, Value>,
 }
 
@@ -37,12 +38,13 @@ impl TryFrom<RawReconciliationRule> for ReconciliationRule {
                 .or(Err(anyhow!("Failed to parse Rule: {:?}", raw.rule)))?,
             values: raw
                 .values
+                .unwrap_or_default()
                 .into_iter()
                 .map(|(k, v)| {
                     let v = match v.clone() {
                         // if string make var expression of string
-                        Value::String(string) => Expr::new(json!(["var", string])),
-                        _ => Expr::new(v.clone()),
+                        Value::String(string) => Arg::from_json(json!(string)),
+                        _ => Arg::from_json(v.clone()),
                     }
                     .or(Err(anyhow!("Failed to parse Expr: {v}")))?;
                     Ok((k, v))
@@ -73,6 +75,7 @@ impl FromStr for ReconciliationRule {
 impl ReconciliationRule {
     fn apply(&self, ge: &mut GeneratingEntry) -> Result<()> {
         // TODO handle list of matching rules
+        // TODO consider also matching on previously generated values?
         if self
             .rule
             .matches(&ge.tx)
@@ -100,6 +103,7 @@ impl ReconciliationRules {
             // matching and updating values
             rule.apply(&mut ge)?;
             // if template rule is encountered return early
+            // TODO templates can be partial so could collect fields on multiple passthrough rules instead of returning early - would just need to decide how to specify non-passthrough rules
             if !rule.template.is_empty() {
                 return Ok(ge);
             }
@@ -121,10 +125,60 @@ impl FromStr for ReconciliationRules {
     }
 }
 
+// TODO perhaps abreviate to GenEntry
 pub struct GeneratingEntry {
     tx: BankTx,
-    values: HashMap<String, Expr>,
+    values: HashMap<String, Arg>,
     template: Map<String, Value>,
+}
+
+pub fn template_deep<F>(val: &mut Value, f: F)
+where
+    F: Fn(&str) -> String + Clone,
+{
+    if let Some(map) = val.as_object_mut() {
+        map.values_mut().for_each(|v| template_deep(v, f.clone()));
+    }
+    if let Some(arr) = val.as_array_mut() {
+        arr.iter_mut().for_each(|v| template_deep(v, f.clone()));
+    } else if let Some(s) = val.as_str() {
+        *val = Value::String(f(s));
+    }
+}
+
+#[test]
+fn template_deep_test() {
+    let mut obj = json!({
+        "string": "test string",
+        "template": "test {value}",
+        "nested": {
+            "template": "test {value}",
+            "templates": [
+                "test {value}"
+            ]
+        },
+        "number": 12,
+        "null": null
+    })
+    .clone();
+
+    template_deep(&mut obj, |s| s.replace("{value}", "result"));
+
+    assert_eq!(
+        obj,
+        json!({
+            "string": "test string",
+            "template": "test result",
+            "nested": {
+                "template": "test result",
+                "templates": [
+                    "test result"
+                ]
+            },
+            "number": 12,
+            "null": null
+        })
+    )
 }
 
 impl GeneratingEntry {
@@ -138,41 +192,39 @@ impl GeneratingEntry {
 
     pub fn generate(&self) -> Result<Entry> {
         todo!()
-        // TODO iteratively allow values in subsequent value expressions
-        // by progressively adding them to the context
-
-        // let evaled = self
-        //     .values
-        //     .iter()
-        //     .map(|(k, exp)| {
-        //         let v = exp
-        //             .matches(&ge.tx)
-        //             .or(Err(anyhow!("Error evaluating expression")))?
-        //             .to_string();
-        //         Ok((k.to_owned(), v))
-        //     })
-        //     .collect::<Result<HashMap<String, String>>>()?;
     }
 
-    fn apply_template(&self) {
-        todo!()
-    }
-
-    /// evaluates value expressions to strings
-    fn evaluate(&self) -> Result<HashMap<String, String>> {
+    /// evaluates value expressions and apply to template
+    fn evaluate(&self) -> Result<(HashMap<String, String>, Value)> {
         // TODO iteratively allow values in subsequent value expressions
         // by progressively adding them to the context
-
-        self.values
+        let evaled = self
+            .values
             .iter()
-            .map(|(k, exp)| {
-                let v = exp
-                    .matches(&self.tx)
-                    .or(Err(anyhow!("Error evaluating expression")))?
-                    .to_string();
+            .map(|(k, arg)| {
+                let v = match arg {
+                    Arg::Expr(exp) => exp
+                        .matches(&self.tx)
+                        .map_err(|e| dbg!(e))
+                        .or(Err(anyhow!("Error evaluating expression: {arg:?}")))?
+                        .to_string(),
+                    _ => arg.to_string(),
+                };
                 Ok((k.to_owned(), v))
             })
-            .collect::<Result<HashMap<String, String>>>()
+            .collect::<Result<HashMap<String, String>>>()?;
+
+        let mut templated = Value::Object(self.template.clone());
+        template_deep(&mut templated, |s| {
+            let mut temp = s.to_string();
+            evaled.iter().for_each(|(k, v)| {
+                let pattern = format!("{{{k}}}");
+                temp = temp.replace(&pattern, v);
+            });
+            temp
+        });
+
+        Ok((evaled, templated))
     }
 
     /// Used to match entries to rules
@@ -182,12 +234,12 @@ impl GeneratingEntry {
         // TODO since rules can generate any type of entry, allow matching on other types
         // eg if party of payment entry doesn't match
 
-        let evaled = self.evaluate()?;
+        let (evaled, templated) = self.evaluate()?;
 
-        // TODO allow date range
+        // TODO allow date range (bank tx dates may lag behind entries)
         // (matching of a very late payment could be overridden by a specific rule)
         // TODO get date from values or template to allow for expressions
-        // TODO potentially just iterate over all available fields after evaluation and interpolation and return false on any mismatch
+        // TODO potentially just iterate over all available fields after evaluation and interpolation and return false on any mismatch - but may require serializeing this given entry to match fields
         if self.tx.date != entry.date() {
             return Ok(false);
         };
@@ -199,7 +251,63 @@ impl GeneratingEntry {
             {
                 return Ok(false);
             }
+        } else {
+            // TODO currently bank_account value is required, but should also match on fully qualified account in templates
+            return Ok(false);
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod rec_rules_tests {
+    use super::*;
+    use crate::bank_txs::BankTx;
+    use anyhow::Result;
+    use indoc::indoc;
+
+    #[test]
+    fn evaluate_test() -> Result<()> {
+        // TODO fork rules crate to allow for things like:
+        // rule: [true] # matches everything
+        // values:
+        //   month: [index, [sub, month, 1], [Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sept, Oct, Nov, Dec]] # use to get month abvr
+
+        let tx: BankTx = "2025-03-06 | XX00 | 60.50 | | ACME Elec. Svc".parse()?;
+
+        let rules: ReconciliationRules = indoc! {r#"
+            rule: [=, account, "XX00"]
+            values:
+              bank_account: Bank Checking
+            ---
+            rule: [match, memo, "ACME Elec*"]
+            values:
+              month_year: [join, "/", [var, month], [var, year]]
+            entry:
+              memo: "{month_year} electric bill"
+              party: ACME Electrical Services
+        "#}
+        .parse()?;
+
+        let gen_entry = rules.apply(&tx)?;
+
+        let (evaled, templated) = gen_entry.evaluate()?;
+
+        assert_eq!(
+            evaled,
+            HashMap::from([
+                ("bank_account".to_string(), "Bank Checking".to_string()),
+                ("month_year".to_string(), "3/2025".to_string())
+            ])
+        );
+        assert_eq!(
+            templated,
+            json!({
+                "party": "ACME Electrical Services",
+                "memo": "3/2025 electric bill"
+            })
+        );
+
+        Ok(())
     }
 }
