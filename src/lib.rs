@@ -7,7 +7,7 @@ pub mod money;
 pub mod report;
 
 use anyhow::{Error, Result};
-use bank_txs::{reconciliation_rules::ReconciliationRules, BankTxs};
+use bank_txs::{rec_rules::RecRules, BankTxs};
 use chart_of_accounts::ChartOfAccounts;
 use entry::journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine};
 use entry::Entry;
@@ -129,7 +129,7 @@ impl Ledger {
         // )
     }
 
-    pub fn reconcile(&self, account: JournalAccount, txs: BankTxs, rules: ReconciliationRules) {
+    pub fn reconcile(&self, account: JournalAccount, txs: BankTxs, rules: RecRules) {
         dbg!(txs);
         // self.entries().for_each(|entry: Entry| {
         //     // try to match each entry

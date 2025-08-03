@@ -1,4 +1,4 @@
-pub mod reconciliation_rules;
+pub mod rec_rules;
 use crate::{
     entry::{
         journal::{
@@ -16,7 +16,7 @@ use async_std::io::BufReader;
 use async_std::prelude::*;
 use chrono::{Datelike, NaiveDate};
 use futures::{future, TryStreamExt};
-use reconciliation_rules::ReconciliationRules;
+use rec_rules::RecRules;
 use serde::{
     ser::{self, SerializeMap},
     Serialize, Serializer,
@@ -115,7 +115,7 @@ impl FromStr for BankTx {
 #[derive(Debug)]
 pub struct BankTxs {
     pub txs: Vec<BankTx>,
-    pub rules: ReconciliationRules,
+    pub rules: RecRules,
 }
 
 impl BankTxs {
@@ -130,7 +130,7 @@ impl BankTxs {
             .await?;
         Ok(Self {
             txs,
-            rules: ReconciliationRules::default(),
+            rules: RecRules::default(),
         })
     }
 
@@ -175,7 +175,7 @@ mod bank_txs_tests {
     use super::*;
     use crate::entry::Entry;
     use anyhow::Result;
-    
+
     use indoc::indoc;
     use std::convert::TryInto;
 

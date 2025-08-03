@@ -146,12 +146,12 @@ async fn main() -> Result<()> {
             if let Some(txs) = reconcile.value_of("bank txs") {
                 let txs = BankTxs::from_file(txs).await?;
                 // let rules = if let Some(rules) = reconcile.value_of("rules") {
-                //     ReconciliationRules::from_file(rules)
+                //     RecRules::from_file(rules)
                 // } else {
-                //     ReconciliationRules::new()
+                //     RecRules::new()
                 // };
 
-                // ledger.reconcile(txs, ReconciliationRules())
+                // ledger.reconcile(txs, RecRules())
             }
         }
     };

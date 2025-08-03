@@ -15,24 +15,24 @@ use std::{
 
 /// Raw struct deserilized from yaml
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
-pub struct RawReconciliationRule {
+pub struct RawRecRule {
     rule: Value,
     values: Option<HashMap<String, Value>>,
     entry: Option<Map<String, Value>>,
 }
 
-// TODO perhaps abreviate this to RecRule
+/// Defines a reconciliation rule for bank txs
 #[derive(Debug)]
-pub struct ReconciliationRule {
+pub struct RecRule {
     rule: Rule,
     values: HashMap<String, Arg>,
     template: Map<String, Value>,
 }
 
-impl TryFrom<RawReconciliationRule> for ReconciliationRule {
+impl TryFrom<RawRecRule> for RecRule {
     type Error = Error;
 
-    fn try_from(raw: RawReconciliationRule) -> Result<Self> {
+    fn try_from(raw: RawRecRule) -> Result<Self> {
         let rule = Self {
             // the error types from this crate don't play well with anyhow
             rule: Rule::new(raw.rule.clone())
@@ -58,11 +58,11 @@ impl TryFrom<RawReconciliationRule> for ReconciliationRule {
     }
 }
 
-impl FromStr for ReconciliationRule {
+impl FromStr for RecRule {
     type Err = Error;
 
     fn from_str(doc: &str) -> Result<Self> {
-        let raw: RawReconciliationRule = serde_yaml::from_str(doc)
+        let raw: RawRecRule = serde_yaml::from_str(doc)
             .with_context(|| anyhow!("Failed to deserialize raw Rule:\n{doc:?}"))?;
 
         let rule: Self = raw
@@ -73,8 +73,8 @@ impl FromStr for ReconciliationRule {
     }
 }
 
-impl ReconciliationRule {
-    fn apply(&self, ge: &mut GeneratingEntry) -> Result<()> {
+impl RecRule {
+    fn apply(&self, ge: &mut GenEntry) -> Result<()> {
         // TODO handle list of matching rules
         // TODO consider also matching on previously generated values?
         if self
@@ -92,14 +92,15 @@ impl ReconciliationRule {
     }
 }
 
+/// List of reconciliation rules for bank txs
 #[derive(Debug, Default)]
-pub struct ReconciliationRules(Vec<ReconciliationRule>);
+pub struct RecRules(Vec<RecRule>);
 
-impl ReconciliationRules {
-    pub fn apply(&self, tx: &BankTx) -> Result<GeneratingEntry> {
-        // create new GeneratingEntry from tx
-        let mut ge = GeneratingEntry::new(tx);
-        // iteratively apply GeneratingEntry to each Rule
+impl RecRules {
+    pub fn apply(&self, tx: &BankTx) -> Result<GenEntry> {
+        // create new GenEntry from tx
+        let mut ge = GenEntry::new(tx);
+        // iteratively apply GenEntry to each Rule
         for rule in self.0.iter() {
             // matching and updating values
             rule.apply(&mut ge)?;
@@ -114,20 +115,19 @@ impl ReconciliationRules {
     }
 }
 
-impl FromStr for ReconciliationRules {
+impl FromStr for RecRules {
     type Err = Error;
 
     fn from_str(doc: &str) -> Result<Self> {
         Ok(Self(
             doc.split("---")
                 .map(|r| r.parse())
-                .collect::<Result<Vec<ReconciliationRule>>>()?,
+                .collect::<Result<Vec<RecRule>>>()?,
         ))
     }
 }
 
-// TODO perhaps abreviate to GenEntry
-pub struct GeneratingEntry {
+pub struct GenEntry {
     tx: BankTx,
     values: HashMap<String, Arg>,
     template: Map<String, Value>,
@@ -182,7 +182,7 @@ fn template_deep_test() {
     )
 }
 
-impl GeneratingEntry {
+impl GenEntry {
     pub fn new(tx: &BankTx) -> Self {
         Self {
             tx: tx.to_owned(),
@@ -345,7 +345,7 @@ mod rec_rules_tests {
 
         let tx: BankTx = "2025-03-06 | XX00 | 60.50 | | ACME Elec. Svc".parse()?;
 
-        let rules: ReconciliationRules = indoc! {r#"
+        let rules: RecRules = indoc! {r#"
             rule: [=, account, "XX00"]
             values:
               bank_account: Bank Checking
