@@ -1,10 +1,11 @@
 use super::BankTx;
-use crate::entry::{journal::JournalEntry, Entry};
+use crate::entry::{journal::JournalEntry, raw, Entry};
 use anyhow::{anyhow, Context, Error, Ok, Result};
-use rule::{arg::Arg, json, rule::Expr, Rule};
+use rule::{arg::Arg, json, Rule};
 use serde::{Deserialize, Serialize};
 // use serde_yaml::Value;
-use serde_json::{Map, Value};
+use crate::entry::journal::JournalAmount::{Credit, Debit};
+use serde_json::{Map, Number, Value};
 use std::{
     collections::HashMap,
     convert::{TryFrom, TryInto},
@@ -191,7 +192,76 @@ impl GeneratingEntry {
     }
 
     pub fn generate(&self) -> Result<Entry> {
-        todo!()
+        let (evaled, mut templated) = self.evaluate()?;
+        let templated = templated
+            .as_object_mut()
+            .context("template not an object")?;
+
+        // set id if not set
+        if templated.get("id").is_none() {
+            templated.insert(
+                "id".to_string(),
+                Value::String(
+                    evaled
+                        .get("id")
+                        .cloned()
+                        // TODO generate better id from tx
+                        .unwrap_or_else(|| {
+                            let famount: f64 = self.tx.amount.try_into().unwrap_or_default();
+                            format!("{}-{}", &self.tx.date.to_string(), &famount.to_string())
+                        }),
+                ),
+            );
+        }
+
+        // set date if not set from values or tx
+        if templated.get("date").is_none() {
+            templated.insert(
+                "date".to_string(),
+                Value::String(
+                    evaled
+                        .get("date")
+                        .cloned()
+                        .unwrap_or(self.tx.date.to_string()),
+                ),
+            );
+        }
+
+        // set memo if not set from values or tx
+        if templated.get("memo").is_none() {
+            templated.insert(
+                "memo".to_string(),
+                Value::String(evaled.get("memo").cloned().unwrap_or(self.tx.memo.clone())),
+            );
+        }
+
+        // set type if not set
+        if templated.get("type").is_none() {
+            // assume a payment type
+            let default_type = match self.tx.amount {
+                Credit(_) => "Payment Received".to_string(),
+                Debit(_) => "Payment Sent".to_string(),
+            };
+            templated.insert("type".to_string(), Value::String(default_type));
+
+            // set ammount of payment type from tx
+            // (this cannot be overriden by values or template!)
+            let famount: f64 = self.tx.amount.try_into()?;
+            templated.insert(
+                "amount".to_string(),
+                Value::Number(Number::from_f64(famount).context("Can't convert to json Number")?),
+            );
+
+            // account from template or special bank_account value
+            if templated.get("account").is_none() {
+                if let Some(bank_account) = evaled.get("bank_account") {
+                    templated.insert("account".to_string(), Value::String(bank_account.clone()));
+                }
+            }
+        }
+
+        let raw_entry: raw::Entry = serde_json::from_value(Value::Object(templated.clone()))?;
+        Ok(raw_entry.try_into()?)
     }
 
     /// evaluates value expressions and apply to template
@@ -239,7 +309,7 @@ impl GeneratingEntry {
         // TODO allow date range (bank tx dates may lag behind entries)
         // (matching of a very late payment could be overridden by a specific rule)
         // TODO get date from values or template to allow for expressions
-        // TODO potentially just iterate over all available fields after evaluation and interpolation and return false on any mismatch - but may require serializeing this given entry to match fields
+        // TODO potentially just iterate over all available fields after evaluation and interpolation and return false on any mismatch - but may require serializing this given entry to match fields
         if self.tx.date != entry.date() {
             return Ok(false);
         };

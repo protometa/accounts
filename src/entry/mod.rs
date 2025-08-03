@@ -1,7 +1,7 @@
 mod invoice;
 pub mod journal;
 mod payment;
-mod raw;
+pub mod raw;
 
 use crate::account::Sign;
 use crate::money::Money;
@@ -38,6 +38,16 @@ impl Date {
             Date::RRule(rrule) => Box::new(rrule.into_iter().map(|d| d.date().naive_utc())),
         }
     }
+
+    fn start(&self) -> NaiveDate {
+        match self {
+            Date::SingleDate(date) => date.clone(),
+            Date::RRule(rrule) => {
+                // RRule zones are all treated as utc
+                rrule.get_properties().dt_start.date().naive_utc()
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -54,58 +64,122 @@ impl Entry {
     pub fn id(&self) -> String {
         self.id.clone()
     }
+
+    /// Returns simple date or first date if recurring
+    pub fn date(&self) -> NaiveDate {
+        self.date.start()
+    }
+
+    /// Returns iterator of entry dates up to and including `util`
     pub fn dates(&self, until: NaiveDate) -> impl Iterator<Item = NaiveDate> + '_ {
         self.date.iter().take_while(move |d| *d <= until)
     }
-    pub fn body(&self) -> Body {
-        self.body.clone()
+
+    pub fn memo(&self) -> Option<String> {
+        self.memo.clone()
     }
 
+    /// Absolute amount of entry (not as debit or credit)
+    pub fn abs_amount(&self) -> Result<Money> {
+        // get absolute amount from all lines of journal entry
+        let (total_debit, total_credit) = self.lines()?.iter().fold(
+            (Money::default(), Money::default()),
+            |(mut debit, mut credit), JournalLine(_, amount)| {
+                match amount {
+                    Debit(money) => debit += *money,
+                    Credit(money) => credit += *money,
+                };
+                (debit, credit)
+            },
+        );
+        assert!(
+            total_debit == total_credit,
+            "Journal entry total debits and credits were not equal!"
+        ); // this should never fail
+        Ok(total_debit)
+    }
+
+    /// Get debit or credit amount from for given account
+    pub fn amount_of_account(&self, account: &str) -> Option<JournalAmount> {
+        self.lines().ok().and_then(|lines| {
+            lines
+                .iter()
+                .find(|JournalLine(a, _)| a == account)
+                .map(|l| l.1)
+        })
+    }
+
+    /// Get party if entry is an invoice or payment type
+    pub fn party(&self) -> Option<String> {
+        match &self.body {
+            Body::PaymentSent(p) | Body::PaymentReceived(p) => Some(p.party.clone()),
+            Body::PurchaseInvoice(i) | Body::SaleInvoice(i) => Some(i.party.clone()),
+            _ => None,
+        }
+    }
+
+    /// Get journal lines
+    pub fn lines(&self) -> Result<Vec<JournalLine>> {
+        Ok(self.to_journal_entry()?.lines())
+    }
+
+    /// Get all journal entries of possibly recurring entry
+    // TODO why doesn't this return an iterator?
     pub fn to_journal_entries(&self, until: Option<NaiveDate>) -> Result<Vec<JournalEntry>> {
         let until = until.unwrap_or({
             let today = Local::today();
             NaiveDate::from_ymd(today.year(), today.month(), today.day())
         });
         self.dates(until)
-            .map(|date| match self.body() {
-                Body::PurchaseInvoice(invoice) => Ok(JournalEntry::new(
-                    &self.id,
-                    &date,
-                    self.memo.as_deref(),
-                    &Self::lines_from_invoice(invoice, Sign::Debit)?,
-                )),
-                Body::PaymentSent(payment) => Ok(JournalEntry::new(
-                    &self.id,
-                    &date,
-                    self.memo.as_deref(),
-                    &[
-                        JournalLine(payment.account, Credit(payment.amount)),
-                        JournalLine(String::from("Accounts Payable"), Debit(payment.amount)),
-                    ],
-                )),
-                Body::SaleInvoice(invoice) => Ok(JournalEntry::new(
-                    &self.id,
-                    &date,
-                    self.memo.as_deref(),
-                    &Self::lines_from_invoice(invoice, Sign::Credit)?,
-                )),
-                Body::PaymentReceived(payment) => Ok(JournalEntry::new(
-                    &self.id,
-                    &date,
-                    self.memo.as_deref(),
-                    &[
-                        JournalLine(payment.account, Debit(payment.amount)),
-                        JournalLine(String::from("Accounts Receivable"), Credit(payment.amount)),
-                    ],
-                )),
-                Body::Journal(lines) => Ok(JournalEntry::new(
-                    &self.id,
-                    &date,
-                    self.memo.as_deref(),
-                    &lines,
-                )),
-            })
+            .map(|date| self.to_journal_entry_for_date(date))
             .collect::<Result<Vec<JournalEntry>>>()
+    }
+
+    pub fn to_journal_entry(&self) -> Result<JournalEntry> {
+        self.to_journal_entry_for_date(self.date())
+    }
+
+    /// Used internally to generate a journal entry from simple date
+    /// or many from recurring dates
+    fn to_journal_entry_for_date(&self, date: NaiveDate) -> Result<JournalEntry> {
+        match self.body.clone() {
+            Body::PurchaseInvoice(invoice) => Ok(JournalEntry::new(
+                &self.id,
+                &date,
+                self.memo.as_deref(),
+                &Self::lines_from_invoice(invoice, Sign::Debit)?,
+            )),
+            Body::PaymentSent(payment) => Ok(JournalEntry::new(
+                &self.id,
+                &date,
+                self.memo.as_deref(),
+                &[
+                    JournalLine(payment.account, Credit(payment.amount)),
+                    JournalLine(String::from("Accounts Payable"), Debit(payment.amount)),
+                ],
+            )),
+            Body::SaleInvoice(invoice) => Ok(JournalEntry::new(
+                &self.id,
+                &date,
+                self.memo.as_deref(),
+                &Self::lines_from_invoice(invoice, Sign::Credit)?,
+            )),
+            Body::PaymentReceived(payment) => Ok(JournalEntry::new(
+                &self.id,
+                &date,
+                self.memo.as_deref(),
+                &[
+                    JournalLine(payment.account, Debit(payment.amount)),
+                    JournalLine(String::from("Accounts Receivable"), Credit(payment.amount)),
+                ],
+            )),
+            Body::Journal(lines) => Ok(JournalEntry::new(
+                &self.id,
+                &date,
+                self.memo.as_deref(),
+                &lines,
+            )),
+        }
     }
 
     fn lines_from_invoice(invoice: Invoice, sign: Sign) -> Result<Vec<JournalLine>> {
@@ -231,7 +305,7 @@ impl FromStr for Entry {
 mod entry_tests {
     use super::*;
     use indoc::indoc;
-    use itertools::assert_equal;
+    
     use std::fs::read_to_string;
 
     #[test]
@@ -267,17 +341,20 @@ mod entry_tests {
             amount: 60.50
         "}
         .parse()?;
-        // let jes = entry.to_journal_entries(Some("2025-04-01".parse()?))?;
-        let jes = entry.to_journal_entries(None)?;
-        let entry = jes.first().context("No journal entries")?;
-        dbg!(entry);
-        assert_eq!(entry.date().to_string(), "2025-03-06");
+
+        dbg!(&entry);
+        assert_eq!(entry.date(), "2025-03-06".parse()?);
         assert_eq!(entry.memo(), Some("Operating Expenses".to_string()));
-        assert!(entry.lines().iter().eq([
-            JournalLine("Bank Checking".to_string(), Credit(60.50.try_into()?),),
-            JournalLine("Accounts Payable".to_string(), Debit(60.50.try_into()?),),
-        ]
-        .iter()));
+
+        assert_eq!(
+            entry.amount_of_account("Bank Checking").unwrap(),
+            JournalAmount::credit(60.50)?
+        );
+        assert_eq!(
+            entry.amount_of_account("Accounts Payable").unwrap(),
+            JournalAmount::debit(60.50)?
+        );
+
         Ok(())
     }
 }

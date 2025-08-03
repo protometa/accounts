@@ -1,7 +1,7 @@
 // use accounts;
 use accounts::{chart_of_accounts::ChartOfAccounts, *};
 use anyhow::Result;
-use bank_txs::{reconciliation_rules::ReconciliationRules, BankTxs};
+use bank_txs::BankTxs;
 use clap::{Arg, Command};
 use entry::journal::JournalEntry;
 use futures::stream::TryStreamExt;

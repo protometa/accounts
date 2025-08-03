@@ -2,6 +2,7 @@
 
 use self::JournalAmount::*;
 use crate::money::Money;
+use anyhow::{Error, Result};
 use chrono::NaiveDate;
 use num_traits::Zero;
 use std::convert::TryInto;
@@ -37,6 +38,22 @@ impl JournalAmount {
             Debit(money) => Credit(*money),
             Credit(money) => Debit(*money),
         }
+    }
+    /// Absolute amount
+    pub fn abs_amount(&self) -> Money {
+        match self {
+            Debit(money) => money.clone(),
+            Credit(money) => money.clone(),
+        }
+    }
+}
+
+impl TryInto<f64> for JournalAmount {
+    type Error = Error;
+
+    fn try_into(self) -> Result<f64> {
+        let f = self.abs_amount().0.try_into()?;
+        Ok(f)
     }
 }
 

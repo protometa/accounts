@@ -1,9 +1,12 @@
 pub mod reconciliation_rules;
 use crate::{
-    entry::journal::{
-        JournalAccount,
-        JournalAmount::{self, Credit, Debit},
-        JournalEntry,
+    entry::{
+        journal::{
+            JournalAccount,
+            JournalAmount::{self, Credit, Debit},
+            JournalEntry,
+        },
+        Entry,
     },
     money::Money,
 };
@@ -158,9 +161,12 @@ impl BankTxs {
     }
 
     /// This will generate new entries from remaining txs after matching and removing
-    pub fn generate_entries(&mut self) {
-        // self.txs.iter().map(|tx| self.rules.apply(tx)?.generate());
-        todo!()
+    pub fn generate_entries(&mut self) -> Result<Vec<Entry>> {
+        // TODO stream this? or at least allow some errors without all failing
+        self.txs
+            .iter()
+            .map(|tx| anyhow::Ok(self.rules.apply(tx)?.generate()?))
+            .collect::<Result<Vec<Entry>>>()
     }
 }
 
@@ -169,6 +175,7 @@ mod bank_txs_tests {
     use super::*;
     use crate::entry::Entry;
     use anyhow::Result;
+    
     use indoc::indoc;
     use std::convert::TryInto;
 
@@ -274,34 +281,47 @@ mod bank_txs_tests {
     }
 
     // TODO test not matching on various fields
-
     // TODO test invoices with payment
-
     // TODO implement inexact dates
-    // TODO test entry generation from rules
 
     #[test]
-    #[ignore]
     fn generate_payment_received() -> Result<()> {
+        // payments are default generated type from bank txs
         let mut txs = BankTxs {
-            txs: vec!["2025-03-07 | X0 |        | 310.00 | POS deposit".parse()?],
-            // TODO payments should probably be default with received/sent variations based on bank account and debit/credit
+            txs: vec!["2025-03-07 | XX00 |        | 310.00 | POS deposit".parse()?],
             rules: indoc! {r#"
-                rule: [eq, account, "XXX000"]
+                rule: [eq, account, "XX00"]
                 values:
                   bank_account: Bank Checking
                 ---
-                rule: [contains, memo, "POS deposit"]
+                rule: [match, memo, "POS deposit"]
                 entry:
-                  type: Payment Received
                   party: ACME POS
             "#}
             .parse()?,
         };
-        let entries = txs.generate_entries();
+        let entries = txs.generate_entries()?;
 
-        todo!();
+        assert_eq!(entries.len(), 1);
+
+        let entry = entries[0].clone();
+        dbg!(&entry);
+
+        assert_eq!(entry.date(), "2025-03-07".parse()?);
+        assert_eq!(entry.memo(), Some("POS deposit".to_string()));
+        assert_eq!(entry.party(), Some("ACME POS".to_string()));
+
+        assert_eq!(
+            entry.amount_of_account("Bank Checking").unwrap(),
+            JournalAmount::debit(310.00)?
+        );
+        assert_eq!(
+            entry.amount_of_account("Accounts Receivable").unwrap(),
+            JournalAmount::credit(310.00)?
+        );
 
         Ok(())
     }
+
+    // TODO test entry generation for other types
 }
