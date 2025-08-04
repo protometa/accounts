@@ -2,12 +2,12 @@
 
 use self::JournalAmount::*;
 use crate::money::Money;
-use anyhow::{Error, Result};
+use anyhow::{bail, Error, Result};
 use chrono::NaiveDate;
 use num_traits::Zero;
 use std::convert::TryInto;
 use std::fmt;
-use std::ops::AddAssign;
+use std::ops::{AddAssign, Deref};
 
 pub type JournalAccount = String;
 
@@ -103,17 +103,65 @@ pub struct JournalEntry {
     r#ref: String,
     date: NaiveDate,
     memo: Option<String>,
-    lines: Vec<JournalLine>,
+    lines: JournalLines,
+}
+
+/// a valid set of journal entry lines
+#[derive(Debug, Clone)]
+pub struct JournalLines(Vec<JournalLine>);
+
+impl JournalLines {
+    pub fn new(lines: Vec<JournalLine>) -> Result<Self> {
+        if lines.is_empty() {
+            bail!("Journal lines cannot be empty");
+        }
+        let (total_debit, total_credit) = lines.iter().fold(
+            (Money::zero(), Money::zero()),
+            |(mut debit, mut credit), JournalLine(_, amount)| {
+                match amount {
+                    Debit(money) => debit += *money,
+                    Credit(money) => credit += *money,
+                };
+                (debit, credit)
+            },
+        );
+        if total_debit != total_credit {
+            bail!("Journal credits and debits are not equal")
+        }
+        Ok(Self(lines))
+    }
+}
+
+impl Deref for JournalLines {
+    type Target = Vec<JournalLine>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl IntoIterator for JournalLines {
+    type Item = JournalLine;
+    type IntoIter = <Vec<JournalLine> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
 }
 
 impl JournalEntry {
-    pub fn new(r#ref: &str, date: &NaiveDate, memo: Option<&str>, lines: &[JournalLine]) -> Self {
-        JournalEntry {
+    pub fn new(
+        r#ref: &str,
+        date: &NaiveDate,
+        memo: Option<&str>,
+        lines: &[JournalLine],
+    ) -> Result<Self> {
+        Ok(JournalEntry {
             r#ref: r#ref.to_owned(),
             date: date.to_owned(),
             memo: memo.map(|s| s.to_owned()),
-            lines: lines.to_owned(),
-        }
+            lines: JournalLines::new(lines.to_owned())?,
+        })
     }
 
     pub fn date(&self) -> NaiveDate {
@@ -124,7 +172,7 @@ impl JournalEntry {
         self.memo.clone()
     }
 
-    pub fn lines(&self) -> Vec<JournalLine> {
+    pub fn lines(&self) -> JournalLines {
         self.lines.clone()
     }
 }

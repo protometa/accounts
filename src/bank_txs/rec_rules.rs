@@ -1,6 +1,6 @@
 use super::BankTx;
 use crate::entry::{journal::JournalEntry, raw, Entry};
-use anyhow::{anyhow, Context, Error, Ok, Result};
+use anyhow::{anyhow, bail, Context, Error, Ok, Result};
 use rule::{arg::Arg, json, Rule};
 use serde::{Deserialize, Serialize};
 // use serde_yaml::Value;
@@ -19,6 +19,7 @@ pub struct RawRecRule {
     rule: Value,
     values: Option<HashMap<String, Value>>,
     entry: Option<Map<String, Value>>,
+    r#final: Option<bool>,
 }
 
 /// Defines a reconciliation rule for bank txs
@@ -27,6 +28,7 @@ pub struct RecRule {
     rule: Rule,
     values: HashMap<String, Arg>,
     template: Map<String, Value>,
+    r#final: bool,
 }
 
 impl TryFrom<RawRecRule> for RecRule {
@@ -53,6 +55,7 @@ impl TryFrom<RawRecRule> for RecRule {
                 .collect::<Result<_>>()?,
             // TODO handle template is not object
             template: raw.entry.unwrap_or_default(),
+            r#final: raw.r#final.unwrap_or(false),
         };
         Ok(rule)
     }
@@ -73,8 +76,10 @@ impl FromStr for RecRule {
     }
 }
 
+/// Applies rule to generating entry if match.
+/// Returns true if there was a match.
 impl RecRule {
-    fn apply(&self, ge: &mut GenEntry) -> Result<()> {
+    fn apply(&self, ge: &mut GenEntry) -> Result<bool> {
         // TODO handle list of matching rules
         // TODO consider also matching on previously generated values?
         if self
@@ -87,8 +92,9 @@ impl RecRule {
             // also merge template
             // TODO do deep merge
             ge.template.extend(self.template.clone());
+            return Ok(true);
         };
-        Ok(())
+        Ok(false)
     }
 }
 
@@ -103,10 +109,9 @@ impl RecRules {
         // iteratively apply GenEntry to each Rule
         for rule in self.0.iter() {
             // matching and updating values
-            rule.apply(&mut ge)?;
-            // if template rule is encountered return early
-            // TODO templates can be partial so could collect fields on multiple passthrough rules instead of returning early - would just need to decide how to specify non-passthrough rules
-            if !rule.template.is_empty() {
+            let matched = rule.apply(&mut ge)?;
+            // if rule matched and is final rule
+            if matched && rule.r#final {
                 return Ok(ge);
             }
         }
@@ -125,12 +130,6 @@ impl FromStr for RecRules {
                 .collect::<Result<Vec<RecRule>>>()?,
         ))
     }
-}
-
-pub struct GenEntry {
-    tx: BankTx,
-    values: HashMap<String, Arg>,
-    template: Map<String, Value>,
 }
 
 pub fn template_deep<F>(val: &mut Value, f: F)
@@ -180,6 +179,13 @@ fn template_deep_test() {
             "null": null
         })
     )
+}
+
+/// An entry in the process of being built by iteratively applying rules
+pub struct GenEntry {
+    tx: BankTx,
+    values: HashMap<String, Arg>,
+    template: Map<String, Value>,
 }
 
 impl GenEntry {
@@ -237,31 +243,94 @@ impl GenEntry {
 
         // set type if not set
         if templated.get("type").is_none() {
-            // assume a payment type
-            let default_type = match self.tx.amount {
-                Credit(_) => "Payment Received".to_string(),
-                Debit(_) => "Payment Sent".to_string(),
-            };
-            templated.insert("type".to_string(), Value::String(default_type));
-
-            // set ammount of payment type from tx
-            // (this cannot be overriden by values or template!)
-            let famount: f64 = self.tx.amount.try_into()?;
-            templated.insert(
-                "amount".to_string(),
-                Value::Number(Number::from_f64(famount).context("Can't convert to json Number")?),
-            );
-
-            // account from template or special bank_account value
-            if templated.get("account").is_none() {
-                if let Some(bank_account) = evaled.get("bank_account") {
-                    templated.insert("account".to_string(), Value::String(bank_account.clone()));
+            if templated.get("party").is_some() {
+                if templated.get("items").is_none() {
+                    // party is given but not items
+                    // assume payment type
+                    let default_type = match self.tx.amount {
+                        Credit(_) => "Payment Received".to_string(),
+                        Debit(_) => "Payment Sent".to_string(),
+                    };
+                    templated.insert("type".to_string(), Value::String(default_type));
+                } else {
+                    // party and items are given
+                    // assume invoice type
+                    let default_type = match self.tx.amount {
+                        Credit(_) => "Purchase Invoice".to_string(),
+                        Debit(_) => "Sales Invoice".to_string(),
+                    };
+                    templated.insert("type".to_string(), Value::String(default_type));
                 }
+            } else {
+                // party is not given
+                // assume journal entry
+                templated.insert(
+                    "type".to_string(),
+                    Value::String("Journal Entry".to_string()),
+                );
             }
         }
 
-        let raw_entry: raw::Entry = serde_json::from_value(Value::Object(templated.clone()))?;
-        Ok(raw_entry.try_into()?)
+        // generate other fields based on type
+        match templated.get("type").and_then(|t| t.as_str()) {
+            Some("Payment Sent") | Some("Payment Received") => {
+                // set ammount of payment type from tx
+                // (this cannot be overriden by values or template!)
+                let famount: f64 = self.tx.amount.try_into()?;
+                templated.insert(
+                    "amount".to_string(),
+                    Value::Number(
+                        Number::from_f64(famount).context("Can't convert to json Number")?,
+                    ),
+                );
+
+                // account from template or special bank_account value
+                if templated.get("account").is_none() {
+                    if let Some(bank_account) = evaled.get("bank_account") {
+                        templated
+                            .insert("account".to_string(), Value::String(bank_account.clone()));
+                    }
+                }
+            }
+            Some("Purchase Invoice") | Some("Sales Invoice") => {
+                // TODO add invoice payment details if possible
+            }
+            Some("Journal Entry") => {
+                // debits and credits from template or special bank_account and offset_account values
+                if templated.get("debits").is_none() && templated.get("credits").is_none() {
+                    if let (Some(bank_account), Some(offset_account)) =
+                        (evaled.get("bank_account"), evaled.get("offset_account"))
+                    {
+                        let samount = self.tx.amount.abs_amount().to_string();
+                        if let Credit(_) = self.tx.amount {
+                            // if bank tx is credit, debit bank account in books
+                            templated
+                                .insert("credits".to_string(), json!({offset_account: samount}));
+                            templated.insert("debits".to_string(), json!({bank_account: samount}));
+                        } else {
+                            // if bank tx is debit, credit bank account in books
+                            templated.insert("credits".to_string(), json!({bank_account: samount}));
+                            templated
+                                .insert("debits".to_string(), json!({offset_account: samount}));
+                        }
+                    }
+                }
+            }
+            Some(s) => {
+                bail!("Invlid type {s:?} found for generated entry from template:\n{templated:?}\nWith values:\n{evaled:?}");
+            }
+            None => {
+                bail!("Cound not determine type for generated entry from template:\n{templated:?}\nWith values:\n{evaled:?}");
+            }
+        }
+
+        let raw_entry: raw::Entry = serde_json::from_value(Value::Object(templated.clone()))
+            .with_context(|| format!("Failed to generate raw entry from template:\n{templated:?}\nWith values:\n{evaled:?}"))?;
+
+        Ok(raw_entry
+            .clone()
+            .try_into()
+            .with_context(|| format!("Failed to generate entry from raw entry:\n{raw_entry:?}"))?)
     }
 
     /// evaluates value expressions and apply to template

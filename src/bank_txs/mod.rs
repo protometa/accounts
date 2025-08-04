@@ -153,7 +153,7 @@ impl BankTxs {
         if let Some(i) = self.txs.iter().position(|tx| {
             self.rules
                 .apply(tx)
-                .is_ok_and(|g| g.match_entry(&entry).is_ok_and(|m| m))
+                .is_ok_and(|g| g.match_entry(&entry).unwrap_or(false))
         }) {
             return Some(self.txs.swap_remove(i));
         };
@@ -285,43 +285,136 @@ mod bank_txs_tests {
     // TODO implement inexact dates
 
     #[test]
-    fn generate_payment_received() -> Result<()> {
-        // payments are default generated type from bank txs
+    fn generate_payment_entries() -> Result<()> {
         let mut txs = BankTxs {
-            txs: vec!["2025-03-07 | XX00 |        | 310.00 | POS deposit".parse()?],
+            txs: vec![
+                "2025-03-07 | XX00 |        | 310.00 | POS deposit".parse()?,
+                "2025-03-08 | XX00 | 60.50  |        | ACME ElecSvc".parse()?,
+            ],
             rules: indoc! {r#"
                 rule: [eq, account, "XX00"]
                 values:
                   bank_account: Bank Checking
                 ---
-                rule: [match, memo, "POS deposit"]
+                rule: [eq, memo, "POS deposit"]
                 entry:
                   party: ACME POS
+                ---
+                rule: [match, memo, "ACME Elec*"]
+                entry:
+                  memo: Electric payment
+                  party: ACME Electrical Services
             "#}
             .parse()?,
         };
         let entries = txs.generate_entries()?;
 
-        assert_eq!(entries.len(), 1);
+        dbg!(&entries);
+        assert_eq!(entries.len(), 2);
 
-        let entry = entries[0].clone();
-        dbg!(&entry);
-
-        assert_eq!(entry.date(), "2025-03-07".parse()?);
-        assert_eq!(entry.memo(), Some("POS deposit".to_string()));
-        assert_eq!(entry.party(), Some("ACME POS".to_string()));
-
+        assert_eq!(entries[0].date(), "2025-03-07".parse()?);
+        assert_eq!(entries[0].memo(), Some("POS deposit".to_string()));
+        assert_eq!(entries[0].party(), Some("ACME POS".to_string()));
         assert_eq!(
-            entry.amount_of_account("Bank Checking").unwrap(),
+            entries[0].amount_of_account("Bank Checking").unwrap(),
             JournalAmount::debit(310.00)?
         );
         assert_eq!(
-            entry.amount_of_account("Accounts Receivable").unwrap(),
+            entries[0].amount_of_account("Accounts Receivable").unwrap(),
             JournalAmount::credit(310.00)?
+        );
+
+        assert_eq!(entries[1].date(), "2025-03-08".parse()?);
+        assert_eq!(entries[1].memo(), Some("Electric payment".to_string()));
+        assert_eq!(
+            entries[1].party(),
+            Some("ACME Electrical Services".to_string())
+        );
+        assert_eq!(
+            entries[1].amount_of_account("Bank Checking").unwrap(),
+            JournalAmount::credit(60.50)?
+        );
+        assert_eq!(
+            entries[1].amount_of_account("Accounts Payable").unwrap(),
+            JournalAmount::debit(60.50)?
         );
 
         Ok(())
     }
 
-    // TODO test entry generation for other types
+    #[test]
+    fn generate_journal_entries() -> Result<()> {
+        let mut txs = BankTxs {
+            txs: vec![
+                "2025-03-01 | XX00 |       | 1000.00 | Transfer from 1234".parse()?,
+                "2025-03-02 | XX00 |       |  500.00 | Transfer from 5678".parse()?,
+                "2025-03-03 | XX00 | 20.00 |         | Transfer to 1234".parse()?,
+            ],
+            rules: indoc! {r#"
+                rule: [eq, account, "XX00"]
+                values:
+                  bank_account: Bank Checking
+                ---
+                rule:
+                  - or
+                  - [match, memo, "Transfer from 1234"]
+                  - [match, memo, "Transfer from 5678"]
+                values:
+                  offset_account: Capital Account
+                entry:
+                  memo: contribution
+                ---
+                rule:
+                  - or
+                  - [match, memo, "Transfer to 1234"]
+                  - [match, memo, "Transfer to 5678"]
+                values:
+                  offset_account: Capital Account
+                entry:
+                  memo: withdrawl
+            "#}
+            .parse()?,
+        };
+        let entries = txs.generate_entries()?;
+
+        dbg!(&entries);
+        assert_eq!(entries.len(), 3);
+
+        assert_eq!(entries[0].date(), "2025-03-01".parse()?);
+        assert_eq!(entries[0].memo(), Some("contribution".to_string()));
+        assert_eq!(
+            entries[0].amount_of_account("Capital Account").unwrap(),
+            JournalAmount::credit(1000.00)?
+        );
+        assert_eq!(
+            entries[0].amount_of_account("Bank Checking").unwrap(),
+            JournalAmount::debit(1000.00)?
+        );
+
+        assert_eq!(entries[1].date(), "2025-03-02".parse()?);
+        assert_eq!(entries[1].memo(), Some("contribution".to_string()));
+        assert_eq!(
+            entries[1].amount_of_account("Capital Account").unwrap(),
+            JournalAmount::credit(500.00)?
+        );
+        assert_eq!(
+            entries[1].amount_of_account("Bank Checking").unwrap(),
+            JournalAmount::debit(500.00)?
+        );
+
+        assert_eq!(entries[2].date(), "2025-03-03".parse()?);
+        assert_eq!(entries[2].memo(), Some("withdrawl".to_string()));
+        assert_eq!(
+            entries[2].amount_of_account("Bank Checking").unwrap(),
+            JournalAmount::credit(20.00)?
+        );
+        assert_eq!(
+            entries[2].amount_of_account("Capital Account").unwrap(),
+            JournalAmount::debit(20.00)?
+        );
+
+        Ok(())
+    }
+
+    // TODO test entry generation for invoice type
 }

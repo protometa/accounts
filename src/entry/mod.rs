@@ -8,7 +8,7 @@ use crate::money::Money;
 use anyhow::{Context, Error, Result};
 use chrono::prelude::*;
 use invoice::{default_monthly_rrule, Invoice};
-use journal::{JournalAmount, JournalEntry, JournalLine};
+use journal::{JournalAmount, JournalEntry, JournalLine, JournalLines};
 use payment::*;
 use rrule::RRule;
 use std::convert::{TryFrom, TryInto};
@@ -41,7 +41,7 @@ impl Date {
 
     fn start(&self) -> NaiveDate {
         match self {
-            Date::SingleDate(date) => date.clone(),
+            Date::SingleDate(date) => *date,
             Date::RRule(rrule) => {
                 // RRule zones are all treated as utc
                 rrule.get_properties().dt_start.date().naive_utc()
@@ -53,7 +53,7 @@ impl Date {
 #[derive(Debug, Clone)]
 pub enum Body {
     // one Body::Journal may represent many JournalEntry as Entry.date is possibly RRule
-    Journal(Vec<JournalLine>),
+    Journal(JournalLines),
     PaymentSent(Payment),
     PaymentReceived(Payment),
     PurchaseInvoice(Invoice),
@@ -119,7 +119,7 @@ impl Entry {
     }
 
     /// Get journal lines
-    pub fn lines(&self) -> Result<Vec<JournalLine>> {
+    pub fn lines(&self) -> Result<JournalLines> {
         Ok(self.to_journal_entry()?.lines())
     }
 
@@ -148,8 +148,8 @@ impl Entry {
                 &date,
                 self.memo.as_deref(),
                 &Self::lines_from_invoice(invoice, Sign::Debit)?,
-            )),
-            Body::PaymentSent(payment) => Ok(JournalEntry::new(
+            )?),
+            Body::PaymentSent(payment) => JournalEntry::new(
                 &self.id,
                 &date,
                 self.memo.as_deref(),
@@ -157,14 +157,14 @@ impl Entry {
                     JournalLine(payment.account, Credit(payment.amount)),
                     JournalLine(String::from("Accounts Payable"), Debit(payment.amount)),
                 ],
-            )),
+            ),
             Body::SaleInvoice(invoice) => Ok(JournalEntry::new(
                 &self.id,
                 &date,
                 self.memo.as_deref(),
                 &Self::lines_from_invoice(invoice, Sign::Credit)?,
-            )),
-            Body::PaymentReceived(payment) => Ok(JournalEntry::new(
+            )?),
+            Body::PaymentReceived(payment) => JournalEntry::new(
                 &self.id,
                 &date,
                 self.memo.as_deref(),
@@ -172,17 +172,14 @@ impl Entry {
                     JournalLine(payment.account, Debit(payment.amount)),
                     JournalLine(String::from("Accounts Receivable"), Credit(payment.amount)),
                 ],
-            )),
-            Body::Journal(lines) => Ok(JournalEntry::new(
-                &self.id,
-                &date,
-                self.memo.as_deref(),
-                &lines,
-            )),
+            ),
+            Body::Journal(lines) => {
+                JournalEntry::new(&self.id, &date, self.memo.as_deref(), &lines)
+            }
         }
     }
 
-    fn lines_from_invoice(invoice: Invoice, sign: Sign) -> Result<Vec<JournalLine>> {
+    fn lines_from_invoice(invoice: Invoice, sign: Sign) -> Result<JournalLines> {
         let (amount_contructor, contra_amount_contructor): (
             fn(Money) -> JournalAmount,
             fn(Money) -> JournalAmount,
@@ -217,7 +214,7 @@ impl Entry {
             Some(payment) => JournalLine(payment.account, contra_amount),
         };
         entries.push(contra_entry);
-        Ok(entries)
+        JournalLines::new(entries)
     }
 }
 
@@ -247,18 +244,13 @@ impl TryFrom<raw::Entry> for Entry {
                 },
             )?,
             memo: raw_entry.memo.to_owned(),
-            body: match raw_entry.r#type {
-                Some(ref s) if s == "Payment Sent" => Ok(Body::PaymentSent(raw_entry.try_into()?)),
-                Some(ref s) if s == "Payment Received" => {
-                    Ok(Body::PaymentReceived(raw_entry.try_into()?))
-                }
-                Some(ref s) if s == "Purchase Invoice" => {
-                    Ok(Body::PurchaseInvoice(raw_entry.try_into()?))
-                }
-                Some(ref s) if s == "Sales Invoice" => Ok(Body::SaleInvoice(raw_entry.try_into()?)),
-                Some(ref s) => Err(Error::msg(format!("{} not a valid Entry type", s))),
-                None => {
-                    Ok(Body::Journal(
+            body: match raw_entry.r#type.as_deref() {
+                Some("Payment Sent") => Ok(Body::PaymentSent(raw_entry.try_into()?)),
+                Some("Payment Received") => Ok(Body::PaymentReceived(raw_entry.try_into()?)),
+                Some("Purchase Invoice") => Ok(Body::PurchaseInvoice(raw_entry.try_into()?)),
+                Some("Sales Invoice") => Ok(Body::SaleInvoice(raw_entry.try_into()?)),
+                Some("Journal Entry") | None => {
+                    let lines =
                         raw_entry
                             .debits
                             .into_iter()
@@ -271,9 +263,10 @@ impl TryFrom<raw::Entry> for Entry {
                                     Ok(JournalLine(account, Credit(amount.parse()?)))
                                 },
                             ))
-                            .collect::<Result<Vec<_>>>()?,
-                    ))
+                            .collect::<Result<Vec<_>>>()?;
+                    Ok(Body::Journal(JournalLines::new(lines)?))
                 }
+                Some(s) => Err(Error::msg(format!("{} not a valid Entry type", s))),
             }?,
         })
     }
@@ -305,7 +298,7 @@ impl FromStr for Entry {
 mod entry_tests {
     use super::*;
     use indoc::indoc;
-    
+
     use std::fs::read_to_string;
 
     #[test]
@@ -331,7 +324,7 @@ mod entry_tests {
     }
 
     #[test]
-    fn to_journal_entries_basic() -> Result<()> {
+    fn parse_payment_entry() -> Result<()> {
         let entry: Entry = indoc! {"
             type: Payment Sent
             date: 2025-03-06
@@ -355,6 +348,22 @@ mod entry_tests {
             JournalAmount::debit(60.50)?
         );
 
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn parse_syntax_error() -> Result<()> {
+        // TODO this produces a very obscure error message and I'm not sure why it's missing context
+        let entry: Entry = indoc! {"
+            type: Payment Sent
+            date: 2025-03-08
+            party: ACME Electrical
+            account: {bank_account}
+            amount: 200.00
+        "}
+        .parse()?;
+        dbg!(&entry);
         Ok(())
     }
 }
