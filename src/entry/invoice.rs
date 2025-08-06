@@ -59,7 +59,7 @@ impl TryFrom<raw::Entry> for Invoice {
                 .map(|payment| -> Result<InvoicePayment> {
                     Ok(InvoicePayment {
                         account: payment.account,
-                        amount: payment.amount.try_into()?,
+                        amount: payment.amount.parse()?,
                     })
                 })
                 .transpose()?,
@@ -89,7 +89,7 @@ impl TryFrom<raw::Item> for InvoiceItem {
                     quantity,
                     rate: rate.try_into()?,
                 },
-                (None, None, Some(amount)) => InvoiceItemAmount::Total(amount.try_into()?),
+                (None, None, Some(amount)) => InvoiceItemAmount::Total(amount.parse()?),
                 _ => bail!(
                     "Invoice Item must specify either amount \
                     exclusively or rate and quantity"
@@ -114,7 +114,7 @@ impl TryFrom<raw::Extra> for InvoiceExtra {
             description,
             account,
             amount: match (amount, rate) {
-                (Some(amount), None) => InvoiceExtraAmount::Total(amount.try_into()?),
+                (Some(amount), None) => InvoiceExtraAmount::Total(amount.parse()?),
                 (None, Some(rate)) => InvoiceExtraAmount::Rate(rate),
                 (_, _) => bail!("Invoice Extra must specify either amount or rate"),
             },

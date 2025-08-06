@@ -7,12 +7,12 @@ pub mod money;
 pub mod report;
 
 use anyhow::{Error, Result};
-use bank_txs::{rec_rules::RecRules, BankTxs};
+use async_std::stream::StreamExt;
 use chart_of_accounts::ChartOfAccounts;
 use entry::journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine};
 use entry::Entry;
 use futures::future::{self, Future};
-use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use futures::stream::{self, Stream, TryStreamExt};
 use lines::lines;
 use lines_ext::LinesExt;
 use report::ReportNode;
@@ -37,7 +37,11 @@ impl Ledger {
     /// Parse own stream of lines into `Entry`s
     pub fn entries(&self) -> impl Stream<Item = Result<Entry>> + '_ {
         lines(self.path.clone())
+            // remove lines starting with #
+            .try_filter(|s| future::ready(!s.trim().starts_with("#")))
             .chunk_by_line("---")
+            // remove any empty chunks
+            .try_filter(|s| future::ready(!s.trim().is_empty()))
             .map_err(Error::new) // map to anyhow::Error from here on
             .and_then(|doc| future::ready(doc.parse()))
     }
@@ -129,14 +133,20 @@ impl Ledger {
         // )
     }
 
-    pub fn reconcile(&self, account: JournalAccount, txs: BankTxs, rules: RecRules) {
-        dbg!(txs);
-        // self.entries().for_each(|entry: Entry| {
-        //     // try to match each entry
-        //     // if !txs.match_and_rm(entry) {
-        //     //     // emit entry not found in bank for reconcilliation report
-        //     // }
-        //     // emit unmatch bank txs as new entries
-        // });
-    }
+    // pub fn reconcile(&self, account: JournalAccount, mut txs: BankTxs) {
+    //     dbg!(&account, &txs);
+    //     self.entries()
+    //         .try_filter(|entry| async move { entry.amount_of_account(account.as_str()).is_some() })
+    //         .try_for_each(|entry: Entry| async {
+    //             if let Some(tx) = txs.match_and_rm(entry.clone()) {
+    //                 println!("Tx:\n{tx:?}\nMatched with entry:\n{entry:?}");
+    //             }
+    //             // try to match each entry
+    //             // if !txs.match_and_rm(entry) {
+    //             //     // emit entry not found in bank for reconcilliation report
+    //             // }
+    //             // emit unmatch bank txs as new entries
+    //             Ok(())
+    //         });
+    // }
 }

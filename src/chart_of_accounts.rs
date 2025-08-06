@@ -16,7 +16,11 @@ impl ChartOfAccounts {
         let file = File::open(file).await?;
         let accounts: Vec<Account> = BufReader::new(file)
             .lines()
+            // remove lines starting with #
+            .try_filter(|s| future::ready(!s.trim().starts_with("#")))
             .chunk_by_line("---")
+            // remove any empty chunks
+            .try_filter(|s| future::ready(!s.trim().is_empty()))
             .map_err(Error::new) // map to anyhow::Error from here on
             .and_then(|doc| future::ready(doc.parse()))
             .try_collect()

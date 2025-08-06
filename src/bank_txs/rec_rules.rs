@@ -1,11 +1,11 @@
 use super::BankTx;
-use crate::entry::{journal::JournalEntry, raw, Entry};
+use crate::entry::{raw, Entry};
 use anyhow::{anyhow, bail, Context, Error, Ok, Result};
 use rule::{arg::Arg, json, Rule};
 use serde::{Deserialize, Serialize};
 // use serde_yaml::Value;
 use crate::entry::journal::JournalAmount::{Credit, Debit};
-use serde_json::{Map, Number, Value};
+use serde_json::{Map, Value};
 use std::{
     collections::HashMap,
     convert::{TryFrom, TryInto},
@@ -126,6 +126,7 @@ impl FromStr for RecRules {
     fn from_str(doc: &str) -> Result<Self> {
         Ok(Self(
             doc.split("---")
+                .filter(|s| !s.trim().is_empty())
                 .map(|r| r.parse())
                 .collect::<Result<Vec<RecRule>>>()?,
         ))
@@ -276,12 +277,9 @@ impl GenEntry {
             Some("Payment Sent") | Some("Payment Received") => {
                 // set ammount of payment type from tx
                 // (this cannot be overriden by values or template!)
-                let famount: f64 = self.tx.amount.try_into()?;
                 templated.insert(
                     "amount".to_string(),
-                    Value::Number(
-                        Number::from_f64(famount).context("Can't convert to json Number")?,
-                    ),
+                    Value::String(self.tx.amount.abs_amount().to_string()),
                 );
 
                 // account from template or special bank_account value
@@ -369,7 +367,7 @@ impl GenEntry {
     /// Used to match entries to rules
     /// Create a GeneratingEntry by applying tx to rules
     /// then attempt to match it to JournalEntry
-    pub fn match_entry(&self, entry: &JournalEntry) -> Result<bool> {
+    pub fn match_entry(&self, entry: &Entry) -> Result<bool> {
         // TODO since rules can generate any type of entry, allow matching on other types
         // eg if party of payment entry doesn't match
 
@@ -384,9 +382,8 @@ impl GenEntry {
         };
         if let Some(bank_account) = evaled.get("bank_account") {
             if entry
-                .lines()
-                .iter()
-                .any(|line| line.0 == *bank_account && line.1 != self.tx.amount.invert())
+                .amount_of_account(bank_account)
+                .is_none_or(|a| a != self.tx.amount.invert())
             {
                 return Ok(false);
             }

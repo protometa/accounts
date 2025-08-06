@@ -1,7 +1,7 @@
 use super::raw;
 use crate::money::Money;
 use anyhow::{Context, Error, Result};
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 
 #[derive(Debug, Clone)]
 pub struct Payment {
@@ -26,7 +26,7 @@ impl TryFrom<raw::Entry> for Payment {
             account: account.context("Account required for Payment Entry")?,
             amount: amount
                 .context("Amount required for Payment Entry")?
-                .try_into()?,
+                .parse()?,
         })
     }
 }

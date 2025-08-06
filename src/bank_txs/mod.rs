@@ -4,16 +4,18 @@ use crate::{
         journal::{
             JournalAccount,
             JournalAmount::{self, Credit, Debit},
-            JournalEntry,
         },
         Entry,
     },
     money::Money,
 };
 use anyhow::{anyhow, Context, Error, Result};
-use async_std::fs::File;
 use async_std::io::BufReader;
 use async_std::prelude::*;
+use async_std::{
+    fs::File,
+    io::ReadExt,
+};
 use chrono::{Datelike, NaiveDate};
 use futures::{future, TryStreamExt};
 use rec_rules::RecRules;
@@ -119,19 +121,26 @@ pub struct BankTxs {
 }
 
 impl BankTxs {
-    pub async fn from_file(file: &str) -> Result<Self> {
+    pub async fn from_files(txs_file: &str, rules_file: Option<&str>) -> Result<Self> {
         // TODO accept txs as dir and accept rules file
-        let file = File::open(file).await?;
+        let file = File::open(txs_file).await?;
         let txs: Vec<BankTx> = BufReader::new(file)
             .lines()
             .map_err(Error::new) // map to anyhow::Error from here on
             .and_then(|line| future::ready(line.parse()))
             .try_collect()
             .await?;
-        Ok(Self {
-            txs,
-            rules: RecRules::default(),
-        })
+
+        let rules = if let Some(rules_file) = rules_file {
+            let mut file = File::open(rules_file).await?;
+            let mut contents = String::new();
+            file.read_to_string(&mut contents).await?;
+            contents.parse()?
+        } else {
+            RecRules::default()
+        };
+
+        Ok(Self { txs, rules })
     }
 
     // // get max date of txs
@@ -145,7 +154,7 @@ impl BankTxs {
     // });
 
     /// match given entry to txs and remove from set of txs
-    pub fn match_and_rm(&mut self, entry: JournalEntry) -> Option<BankTx> {
+    pub fn match_and_rm(&mut self, entry: Entry) -> Option<BankTx> {
         // TODO handle case where entry matches bank account but not found
         if self.txs.is_empty() {
             return None;
@@ -173,7 +182,7 @@ impl BankTxs {
 #[cfg(test)]
 mod bank_txs_tests {
     use super::*;
-    use crate::entry::Entry;
+    
     use anyhow::Result;
 
     use indoc::indoc;
@@ -182,6 +191,7 @@ mod bank_txs_tests {
     #[test]
     fn bank_tx_parse() -> Result<()> {
         let tx: BankTx = "2025-03-06 | XXXX0000 |      60.50 |            | Electrical".parse()?;
+        dbg!(&tx);
         assert_eq!(
             tx,
             BankTx {
@@ -223,7 +233,12 @@ mod bank_txs_tests {
     #[test]
     fn match_payment_sent() -> Result<()> {
         let mut txs = BankTxs {
-            txs: vec!["2025-03-06 | XX00 |  60.50 |        | Electrical".parse()?],
+            txs: vec![
+                "2025-03-06 | XX00 |  60.50 |        | Electrical".parse()?,
+                "2025-03-06 | XX00 |   5.00 |        | Misc".parse()?,
+                "2025-03-07 | XX00 |        | 310.00 | POS deposit".parse()?,
+                "2025-03-07 | XX00 |        |   5.00 | Misc".parse()?,
+            ],
             rules: indoc! {r#"
                 rule: [eq, account, "XX00"]
                 values:
@@ -239,22 +254,25 @@ mod bank_txs_tests {
             account: Bank Checking
             amount: 60.50
         "}
-        .parse::<Entry>()?
-        .to_journal_entries(None)?[0]
-            .clone();
+        .parse()?;
 
         let matched = txs.match_and_rm(entry);
 
         dbg!(&matched);
         assert!(matched.is_some());
-        assert!(txs.txs.is_empty());
+        assert_eq!(txs.txs.len(), 3);
         Ok(())
     }
 
     #[test]
     fn match_payment_received() -> Result<()> {
         let mut txs = BankTxs {
-            txs: vec!["2025-03-07 | XX00 |        | 310.00 | POS deposit".parse()?],
+            txs: vec![
+                "2025-03-06 | XX00 |  60.50 |        | Electrical".parse()?,
+                "2025-03-06 | XX00 |   5.00 |        | Misc".parse()?,
+                "2025-03-07 | XX00 |        | 310.00 | POS deposit".parse()?,
+                "2025-03-07 | XX00 |        |   5.00 | Misc".parse()?,
+            ],
             rules: indoc! {r#"
                 rule: [eq, account, "XX00"]
                 values:
@@ -262,21 +280,20 @@ mod bank_txs_tests {
             "#}
             .parse()?,
         };
-        let matched = txs.match_and_rm(
-            indoc! {"
-                type: Payment Received
-                date: 2025-03-07
-                party: ACME POS
-                account: Bank Checking
-                amount: 310.00
-            "}
-            .parse::<Entry>()?
-            .to_journal_entries(None)?[0]
-                .clone(),
-        );
+        let entry = indoc! {"
+            type: Payment Received
+            date: 2025-03-07
+            party: ACME POS
+            account: Bank Checking
+            amount: 310.00
+        "}
+        .parse()?;
+
+        let matched = txs.match_and_rm(entry);
+
         dbg!(&matched);
         assert!(matched.is_some());
-        assert!(txs.txs.is_empty());
+        assert_eq!(txs.txs.len(), 3);
         Ok(())
     }
 

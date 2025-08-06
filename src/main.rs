@@ -3,8 +3,8 @@ use accounts::{chart_of_accounts::ChartOfAccounts, *};
 use anyhow::Result;
 use bank_txs::BankTxs;
 use clap::{Arg, Command};
-use entry::journal::JournalEntry;
-use futures::stream::TryStreamExt;
+use entry::{journal::JournalEntry, Entry};
+use futures::{future, stream::TryStreamExt};
 use std::fs;
 
 #[async_std::main]
@@ -61,6 +61,15 @@ async fn main() -> Result<()> {
             Command::new("reconcile")
                 .about("Reconcile entries with bank transactions")
                 .arg(
+                    Arg::new("account")
+                        .short('a')
+                        .long("account")
+                        .help("Bank account from ledger to reconcile")
+                        .value_name("ACCOUNT")
+                        .takes_value(true)
+                        .required(true),
+                )
+                .arg(
                     Arg::new("bank txs")
                         .short('b')
                         .long("bank-txs")
@@ -73,7 +82,7 @@ async fn main() -> Result<()> {
                     Arg::new("rules")
                         .short('r')
                         .long("rules")
-                        .help("Rules spec file for matching txs")
+                        .help("Rules spec file for matching and generating txs")
                         .value_name("FILE")
                         .takes_value(true)
                         .required(false),
@@ -143,16 +152,41 @@ async fn main() -> Result<()> {
             //         println!("{:25} | {}", account, amount);
             //     });
         } else if let Some(reconcile) = matches.subcommand_matches("reconcile") {
-            if let Some(txs) = reconcile.value_of("bank txs") {
-                let txs = BankTxs::from_file(txs).await?;
-                // let rules = if let Some(rules) = reconcile.value_of("rules") {
-                //     RecRules::from_file(rules)
-                // } else {
-                //     RecRules::new()
-                // };
+            let account = reconcile.value_of("account").unwrap(); // required
+            let txs_file = reconcile.value_of("bank txs").unwrap(); // required
+            let rules_file = reconcile.value_of("rules");
+            let mut txs = BankTxs::from_files(txs_file, rules_file).await?;
 
-                // ledger.reconcile(txs, RecRules())
-            }
+            // ledger.reconcile(account.to_owned(), txs)
+            ledger
+                .entries()
+                .try_filter(|entry| {
+                    let has_account = entry.amount_of_account(account).is_some();
+                    future::ready(has_account)
+                })
+                .try_for_each(|entry: Entry| {
+                    // dbg!(&entry, &txs);
+                    if let Some(tx) = txs.match_and_rm(entry.clone()) {
+                        println!("{tx:?}\nMatched with:\n{entry:?}\n---");
+                    } else {
+                        eprintln!("No matching tx for: {entry:?}\n---");
+                    };
+
+                    // txs.generate_entries().unwrap();
+
+                    future::ready(Ok(()))
+                })
+                .await?;
+
+            txs.txs.iter().for_each(|tx| {
+                let gen = txs.rules.apply(tx).and_then(|g| g.generate());
+
+                if let Ok(entry) = gen {
+                    println!("Entry generated:\n{entry:?}\n---")
+                } else {
+                    eprintln!("Could not generate entry for:\n{tx:?}\n---")
+                };
+            });
         }
     };
     Ok(())
