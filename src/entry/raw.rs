@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
+use serde_with::skip_serializing_none;
 use std::collections::HashMap;
 
 /// Raw struct deserilized from yaml
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[skip_serializing_none]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
 pub struct Entry {
     pub id: Option<String>, // if not specified will use filename
     pub r#type: Option<String>,

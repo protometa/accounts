@@ -3,7 +3,7 @@ use accounts::{chart_of_accounts::ChartOfAccounts, *};
 use anyhow::Result;
 use bank_txs::BankTxs;
 use clap::{Arg, Command};
-use entry::{journal::JournalEntry, Entry};
+use entry::{journal::JournalEntry, raw, Entry};
 use futures::{future, stream::TryStreamExt};
 use std::fs;
 
@@ -157,7 +157,6 @@ async fn main() -> Result<()> {
             let rules_file = reconcile.value_of("rules");
             let mut txs = BankTxs::from_files(txs_file, rules_file).await?;
 
-            // ledger.reconcile(account.to_owned(), txs)
             ledger
                 .entries()
                 .try_filter(|entry| {
@@ -165,28 +164,27 @@ async fn main() -> Result<()> {
                     future::ready(has_account)
                 })
                 .try_for_each(|entry: Entry| {
-                    // dbg!(&entry, &txs);
                     if let Some(tx) = txs.match_and_rm(entry.clone()) {
                         println!("{tx:?}\nMatched with:\n{entry:?}\n---");
                     } else {
-                        eprintln!("No matching tx for: {entry:?}\n---");
+                        eprintln!("ERROR: No matching tx for: {entry:?}\n---");
                     };
-
-                    // txs.generate_entries().unwrap();
 
                     future::ready(Ok(()))
                 })
                 .await?;
 
-            txs.txs.iter().for_each(|tx| {
-                let gen = txs.rules.apply(tx).and_then(|g| g.generate());
-
-                if let Ok(entry) = gen {
-                    println!("Entry generated:\n{entry:?}\n---")
-                } else {
-                    eprintln!("Could not generate entry for:\n{tx:?}\n---")
-                };
-            });
+            txs.txs
+                .iter()
+                .map(|tx| {
+                    let raw: raw::Entry = txs.rules.apply(tx)?.generate()?.into();
+                    let entry = serde_yaml::to_string(&raw)?;
+                    anyhow::Ok(entry)
+                })
+                .for_each(|res| match res {
+                    Ok(entry) => println!("Entry generated:\n{entry}---"),
+                    Err(err) => eprintln!("ERROR: {err}\n---"),
+                })
         }
     };
     Ok(())

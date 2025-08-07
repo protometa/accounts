@@ -33,6 +33,30 @@ impl JournalAmount {
     pub fn credit(n: f64) -> anyhow::Result<Self> {
         Ok(Credit(n.try_into()?))
     }
+    pub fn as_debit(&self) -> Option<Money> {
+        match self {
+            Debit(money) => Some(money.clone()),
+            Credit(_) => None,
+        }
+    }
+    pub fn as_credit(&self) -> Option<Money> {
+        match self {
+            Debit(_) => None,
+            Credit(money) => Some(money.clone()),
+        }
+    }
+    pub fn is_debit(&self) -> bool {
+        match self {
+            Debit(_) => true,
+            Credit(_) => false,
+        }
+    }
+    pub fn is_credit(&self) -> bool {
+        match self {
+            Debit(_) => false,
+            Credit(_) => true,
+        }
+    }
     pub fn invert(&self) -> Self {
         match self {
             Debit(money) => Credit(*money),

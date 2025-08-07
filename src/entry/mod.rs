@@ -11,6 +11,7 @@ use invoice::{default_monthly_rrule, Invoice};
 use journal::{JournalAmount, JournalEntry, JournalLine, JournalLines};
 use payment::*;
 use rrule::RRule;
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::iter::{self, Iterator};
 use std::str::FromStr;
@@ -269,6 +270,49 @@ impl TryFrom<raw::Entry> for Entry {
                 Some(s) => Err(Error::msg(format!("{} not a valid Entry type", s))),
             }?,
         })
+    }
+}
+
+// impl TryInto<raw::Entry> for Entry {
+impl From<Entry> for raw::Entry {
+    // type Error = Error;
+
+    // fn try_into(self) -> std::result::Result<raw::Entry, Self::Error> {
+    fn from(val: Entry) -> Self {
+        let id = Some(val.id());
+        let date = val.date().to_string();
+        let memo = val.memo();
+
+        let raw_body = match val.body {
+            Body::Journal(lines) => {
+                let debits: HashMap<String, String> = lines
+                    .iter()
+                    .filter_map(|l| l.1.as_debit().map(|m| (l.0.clone(), m.to_string())))
+                    .collect();
+                let credits: HashMap<String, String> = lines
+                    .iter()
+                    .filter_map(|l| l.1.as_credit().map(|m| (l.0.clone(), m.to_string())))
+                    .collect();
+
+                raw::Entry {
+                    r#type: None,
+                    debits: Some(debits),
+                    credits: Some(credits),
+                    ..Default::default()
+                }
+            }
+            _ => {
+                unimplemented!()
+            }
+        };
+
+        // Ok(raw::Entry {
+        raw::Entry {
+            date,
+            memo,
+            ..raw_body
+        }
+        // })
     }
 }
 
