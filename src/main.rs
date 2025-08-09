@@ -164,27 +164,30 @@ async fn main() -> Result<()> {
                     future::ready(has_account)
                 })
                 .try_for_each(|entry: Entry| {
-                    if let Some(tx) = txs.match_and_rm(entry.clone()) {
-                        println!("{tx:?}\nMatched with:\n{entry:?}\n---");
+                    let matched = txs.match_and_rm(entry.clone());
+                    if !matched.is_empty() {
+                        println!("Matched:\n{matched:?}\nwith:\n{entry:?}\n---");
                     } else {
-                        eprintln!("ERROR: No matching tx for: {entry:?}\n---");
+                        eprintln!("ERROR: No matching tx for:\n{entry:?}\n---");
                     };
 
                     future::ready(Ok(()))
                 })
                 .await?;
 
-            txs.txs
-                .iter()
-                .map(|tx| {
+            txs.txs.iter().rev().for_each(|tx| {
+                let entry = (|| {
                     let raw: raw::Entry = txs.rules.apply(tx)?.generate()?.into();
                     let entry = serde_yaml::to_string(&raw)?;
                     anyhow::Ok(entry)
-                })
-                .for_each(|res| match res {
+                })();
+
+                match entry {
                     Ok(entry) => println!("Entry generated:\n{entry}---"),
-                    Err(err) => eprintln!("ERROR: {err}\n---"),
-                })
+                    // TODO figure out how to show tx in error
+                    Err(err) => eprintln!("ERROR generating:\n{tx:?}:\n{err}\n---"),
+                }
+            })
         }
     };
     Ok(())

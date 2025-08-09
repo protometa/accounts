@@ -12,12 +12,10 @@ use crate::{
 use anyhow::{anyhow, Context, Error, Result};
 use async_std::io::BufReader;
 use async_std::prelude::*;
-use async_std::{
-    fs::File,
-    io::ReadExt,
-};
+use async_std::{fs::File, io::ReadExt};
 use chrono::{Datelike, NaiveDate};
 use futures::{future, TryStreamExt};
+use itertools::Itertools;
 use rec_rules::RecRules;
 use serde::{
     ser::{self, SerializeMap},
@@ -154,19 +152,18 @@ impl BankTxs {
     // });
 
     /// match given entry to txs and remove from set of txs
-    pub fn match_and_rm(&mut self, entry: Entry) -> Option<BankTx> {
-        // TODO handle case where entry matches bank account but not found
+    pub fn match_and_rm(&mut self, entry: Entry) -> Vec<BankTx> {
         if self.txs.is_empty() {
-            return None;
+            return Vec::new();
         }
-        if let Some(i) = self.txs.iter().position(|tx| {
-            self.rules
-                .apply(tx)
+        let rules = self.rules.clone();
+        let is = self.txs.clone().into_iter().positions(|tx| {
+            rules
+                .apply(&tx)
                 .is_ok_and(|g| g.match_entry(&entry).unwrap_or(false))
-        }) {
-            return Some(self.txs.swap_remove(i));
-        };
-        None
+        });
+        // must be reversed (desc order) so removing lower indexes don't invalidate higher indexes
+        is.rev().map(|i| self.txs.swap_remove(i)).collect()
     }
 
     /// This will generate new entries from remaining txs after matching and removing
@@ -182,7 +179,7 @@ impl BankTxs {
 #[cfg(test)]
 mod bank_txs_tests {
     use super::*;
-    
+
     use anyhow::Result;
 
     use indoc::indoc;
@@ -231,6 +228,43 @@ mod bank_txs_tests {
     // TODO test journal entry
 
     #[test]
+    fn match_journal_entry_multiple_lines() -> Result<()> {
+        let mut txs = BankTxs {
+            txs: vec![
+                "2020-01-03 | XX00 |        |   1000 | Transfer from 003".parse()?,
+                "2020-01-02 | XX00 |        |  10000 | Transfer from 001".parse()?,
+                "2020-01-02 | XX00 |        |   5000 | Transfer from 002".parse()?,
+            ],
+            rules: indoc! {r#"
+                rule: [eq, account, "XX00"]
+                values:
+                  bank_account: Bank
+            "#}
+            .parse()?,
+        };
+        let entry: Entry = indoc! {"
+            ---
+            date: 2020-01-02
+            memo: Initial Contribution
+            credits:
+              Owner Contributions: $15,000  
+            debits:
+              - account: Bank
+                amount: $10,000
+              - account: Bank
+                amount: $5,000
+        "}
+        .parse()?;
+
+        let matched = txs.match_and_rm(entry);
+
+        dbg!(&matched);
+        assert_eq!(matched.len(), 2);
+        assert_eq!(txs.txs.len(), 1);
+        Ok(())
+    }
+
+    #[test]
     fn match_payment_sent() -> Result<()> {
         let mut txs = BankTxs {
             txs: vec![
@@ -259,7 +293,7 @@ mod bank_txs_tests {
         let matched = txs.match_and_rm(entry);
 
         dbg!(&matched);
-        assert!(matched.is_some());
+        assert_eq!(matched.len(), 1);
         assert_eq!(txs.txs.len(), 3);
         Ok(())
     }
@@ -292,7 +326,7 @@ mod bank_txs_tests {
         let matched = txs.match_and_rm(entry);
 
         dbg!(&matched);
-        assert!(matched.is_some());
+        assert_eq!(matched.len(), 1);
         assert_eq!(txs.txs.len(), 3);
         Ok(())
     }

@@ -7,13 +7,16 @@ use crate::account::Sign;
 use crate::money::Money;
 use anyhow::{Context, Error, Result};
 use chrono::prelude::*;
+use futures::stream::BoxStream;
 use invoice::{default_monthly_rrule, Invoice};
 use journal::{JournalAmount, JournalEntry, JournalLine, JournalLines};
 use payment::*;
+use raw::{ExpandedLine, SimpleOrExpandedLines};
 use rrule::RRule;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::iter::{self, Iterator};
+use std::ops::AddAssign;
 use std::str::FromStr;
 use JournalAmount::{Credit, Debit};
 
@@ -105,8 +108,12 @@ impl Entry {
         self.lines().ok().and_then(|lines| {
             lines
                 .iter()
-                .find(|JournalLine(a, _)| a == account)
+                .filter(|JournalLine(a, _)| a == account)
                 .map(|l| l.1)
+                .reduce(|mut a: JournalAmount, b| {
+                    a.add_assign(b);
+                    a
+                })
         })
     }
 
@@ -251,20 +258,42 @@ impl TryFrom<raw::Entry> for Entry {
                 Some("Purchase Invoice") => Ok(Body::PurchaseInvoice(raw_entry.try_into()?)),
                 Some("Sales Invoice") => Ok(Body::SaleInvoice(raw_entry.try_into()?)),
                 Some("Journal Entry") | None => {
-                    let lines =
-                        raw_entry
-                            .debits
-                            .into_iter()
-                            .flatten()
-                            .map(|(account, amount)| {
-                                Ok(JournalLine(account, Debit(amount.parse()?)))
-                            })
-                            .chain(raw_entry.credits.into_iter().flatten().map(
-                                |(account, amount)| {
-                                    Ok(JournalLine(account, Credit(amount.parse()?)))
-                                },
-                            ))
-                            .collect::<Result<Vec<_>>>()?;
+                    // TODO refactor this out to reusable function
+                    let debit_lines: Box<dyn Iterator<Item = Result<JournalLine>>> =
+                        match raw_entry.debits {
+                            Some(SimpleOrExpandedLines::Simple(hashmap)) => {
+                                Box::new(hashmap.into_iter().map(|(account, amount)| {
+                                    Ok(JournalLine(account.to_owned(), Debit(amount)))
+                                }))
+                            }
+                            Some(SimpleOrExpandedLines::Expanded(expanded)) => {
+                                Box::new(expanded.into_iter().map(
+                                    |ExpandedLine { account, amount }| {
+                                        Ok(JournalLine(account.to_owned(), Debit(amount)))
+                                    },
+                                ))
+                            }
+                            None => Box::new(std::iter::empty()),
+                        };
+                    let credit_lines: Box<dyn Iterator<Item = Result<JournalLine>>> =
+                        match raw_entry.credits {
+                            Some(SimpleOrExpandedLines::Simple(hashmap)) => {
+                                Box::new(hashmap.into_iter().map(|(account, amount)| {
+                                    Ok(JournalLine(account.to_owned(), Credit(amount)))
+                                }))
+                            }
+                            Some(SimpleOrExpandedLines::Expanded(expanded)) => {
+                                Box::new(expanded.into_iter().map(
+                                    |ExpandedLine { account, amount }| {
+                                        Ok(JournalLine(account.to_owned(), Credit(amount)))
+                                    },
+                                ))
+                            }
+                            None => Box::new(std::iter::empty()),
+                        };
+                    let lines = credit_lines
+                        .chain(debit_lines)
+                        .collect::<Result<Vec<_>>>()?;
                     Ok(Body::Journal(JournalLines::new(lines)?))
                 }
                 Some(s) => Err(Error::msg(format!("{} not a valid Entry type", s))),
@@ -279,30 +308,32 @@ impl From<Entry> for raw::Entry {
 
     // fn try_into(self) -> std::result::Result<raw::Entry, Self::Error> {
     fn from(val: Entry) -> Self {
-        let id = Some(val.id());
+        // let id = Some(val.id);
         let date = val.date().to_string();
         let memo = val.memo();
 
         let raw_body = match val.body {
             Body::Journal(lines) => {
-                let debits: HashMap<String, String> = lines
+                let debits: HashMap<String, Money> = lines
                     .iter()
-                    .filter_map(|l| l.1.as_debit().map(|m| (l.0.clone(), m.to_string())))
+                    .filter_map(|l| l.1.as_debit().map(|m| (l.0.clone(), m)))
                     .collect();
-                let credits: HashMap<String, String> = lines
+                let credits: HashMap<String, Money> = lines
                     .iter()
-                    .filter_map(|l| l.1.as_credit().map(|m| (l.0.clone(), m.to_string())))
+                    .filter_map(|l| l.1.as_credit().map(|m| (l.0.clone(), m)))
                     .collect();
 
+                // TODO check to see if this is a case where expanded lines should be used
                 raw::Entry {
                     r#type: None,
-                    debits: Some(debits),
-                    credits: Some(credits),
+                    debits: Some(SimpleOrExpandedLines::Simple(debits)),
+                    credits: Some(SimpleOrExpandedLines::Simple(credits)),
                     ..Default::default()
                 }
             }
+            // TODO handle all the other types
             _ => {
-                unimplemented!()
+                todo!()
             }
         };
 
@@ -347,23 +378,69 @@ mod entry_tests {
 
     #[test]
     fn parse_journal_entry() -> Result<()> {
-        let entry = read_to_string("./tests/fixtures/entries_flat/2020-01-02-Journal.yaml")?
-            .parse::<Entry>()?;
+        let entry: Entry = indoc! {"
+            ---
+            date: 2020-01-01
+            memo: Initial Contribution
+            debits:
+              Bank: 500
+            credits:
+              Owner Contributions: 500
+        "}
+        .parse()?;
+
         dbg!(&entry);
-        assert!(matches!(entry.date, Date::SingleDate(s) if s.to_string() == "2020-01-01"));
-        assert_eq!(entry.memo, Some("Initial Contribution".to_string()));
-        assert!(
-            matches!(entry.body.clone(), Body::Journal(lines) if lines.iter().eq([
-                JournalLine(
-                    "Bank".to_string(),
-                    Debit(15000.00.try_into()?),
-                ),
-                JournalLine(
-                    "Owner Contributions".to_string(),
-                    Credit(15000.00.try_into()?),
-                ),
-            ].iter()))
+
+        assert_eq!(entry.date(), "2020-01-01".parse()?);
+        assert_eq!(entry.memo(), Some("Initial Contribution".to_string()));
+
+        assert_eq!(
+            entry.amount_of_account("Bank").unwrap(),
+            JournalAmount::debit(500.00)?
         );
+        assert_eq!(
+            entry.amount_of_account("Owner Contributions").unwrap(),
+            JournalAmount::credit(500.00)?
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_journal_entry_expanded_accounts() -> Result<()> {
+        // allows expanded journal line format for more advanced entries
+        // split into to separate deposits which will match bank txs
+        let entry: Entry = indoc! {"
+            ---
+            date: 2020-01-02
+            memo: Initial Contribution
+            credits:
+              Owner Contributions: $15,000.00  
+            debits:
+              - account: Bank
+                amount: $10000.00
+              - account: Bank
+                amount: $50,00.00
+        "}
+        .parse()?;
+
+        dbg!(&entry);
+
+        assert_eq!(entry.date(), "2020-01-02".parse()?);
+        assert_eq!(entry.memo(), Some("Initial Contribution".to_string()));
+
+        assert_eq!(
+            entry.amount_of_account("Bank").unwrap(),
+            JournalAmount::debit(15000.00)?
+        );
+        assert_eq!(
+            entry.amount_of_account("Owner Contributions").unwrap(),
+            JournalAmount::credit(15000.00)?
+        );
+
+        // contains two lines for "Owner Contributions"
+        assert_eq!(entry.lines()?.iter().filter(|l| l.0 == "Bank").count(), 2);
+
         Ok(())
     }
 

@@ -1,9 +1,12 @@
 use anyhow::{Context, Error, Result};
 use rust_decimal::prelude::*;
+use serde::de::{self, Deserializer, Visitor};
+use serde::{Serialize, Serializer};
 use std::cmp::Eq;
 use std::convert::TryFrom;
 use std::fmt;
 use std::ops::*;
+use std::str::FromStr;
 
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, PartialOrd)]
 pub struct Money(pub Decimal);
@@ -14,6 +17,18 @@ impl TryFrom<f64> for Money {
 
     fn try_from(f: f64) -> Result<Self> {
         let mut d = Decimal::from_f64(f).context(format!("Failed to convert {} to Money", f))?;
+        if d.scale() < 2 {
+            d.rescale(2);
+        }
+        Ok(Self(d))
+    }
+}
+
+impl TryFrom<u64> for Money {
+    type Error = Error;
+
+    fn try_from(f: u64) -> Result<Self> {
+        let mut d = Decimal::from_u64(f).context(format!("Failed to convert {} to Money", f))?;
         if d.scale() < 2 {
             d.rescale(2);
         }
@@ -85,6 +100,58 @@ impl Neg for Money {
         } else {
             self
         }
+    }
+}
+
+impl Serialize for Money {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0.to_string())
+    }
+}
+
+impl<'de> de::Deserialize<'de> for Money {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(MyValueVisitor)
+    }
+}
+
+struct MyValueVisitor;
+
+impl<'de> Visitor<'de> for MyValueVisitor {
+    type Value = Money;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a string or a number")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Money::from_str(&value.to_owned())
+            .map_err(|_| serde::de::Error::custom("Failed to convert string to Money"))
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Money::try_from(value)
+            .map_err(|_| serde::de::Error::custom("Failed to convert money from number"))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Money::try_from(value as f64)
+            .map_err(|_| serde::de::Error::custom("Failed to convert money from number"))
     }
 }
 

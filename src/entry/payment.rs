@@ -24,9 +24,7 @@ impl TryFrom<raw::Entry> for Payment {
         Ok(Self {
             party: party.context("Party required for Payment Entry")?,
             account: account.context("Account required for Payment Entry")?,
-            amount: amount
-                .context("Amount required for Payment Entry")?
-                .parse()?,
+            amount: amount.context("Amount required for Payment Entry")?,
         })
     }
 }

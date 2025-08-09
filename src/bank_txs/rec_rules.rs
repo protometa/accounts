@@ -23,7 +23,7 @@ pub struct RawRecRule {
 }
 
 /// Defines a reconciliation rule for bank txs
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RecRule {
     rule: Rule,
     values: HashMap<String, Arg>,
@@ -99,7 +99,7 @@ impl RecRule {
 }
 
 /// List of reconciliation rules for bank txs
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct RecRules(Vec<RecRule>);
 
 impl RecRules {
@@ -382,8 +382,11 @@ impl GenEntry {
         };
         if let Some(bank_account) = evaled.get("bank_account") {
             if entry
-                .amount_of_account(bank_account)
-                .is_none_or(|a| a != self.tx.amount.invert())
+                .lines()?
+                .iter()
+                .filter(|l| l.0 == *bank_account && l.1 == self.tx.amount.invert())
+                .count()
+                == 0
             {
                 return Ok(false);
             }
