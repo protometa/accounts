@@ -5,6 +5,7 @@ use crate::money::Money;
 use anyhow::{bail, Error, Result};
 use chrono::NaiveDate;
 use num_traits::Zero;
+use std::cmp::Ordering;
 use std::convert::TryInto;
 use std::fmt;
 use std::ops::{AddAssign, Deref};
@@ -81,15 +82,6 @@ impl TryInto<f64> for JournalAmount {
     }
 }
 
-impl fmt::Display for JournalAmount {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Debit(debit) => write!(f, "{:>12} |             ", debit.to_string()),
-            Self::Credit(credit) => write!(f, "             | {:>12}", credit.to_string()),
-        }
-    }
-}
-
 impl AddAssign for JournalAmount {
     fn add_assign(&mut self, other: Self) {
         // treat credit amount as negative to add
@@ -113,13 +105,6 @@ impl AddAssign for JournalAmount {
 #[derive(Debug, Clone, PartialEq)]
 pub struct JournalLine(pub JournalAccount, pub JournalAmount);
 
-impl fmt::Display for JournalLine {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self(account, amount) = self;
-        write!(f, "{:25} | {}", account.to_string(), amount)
-    }
-}
-
 /// Represents simple journal entry with definite date
 /// Contains reference to Entry that generated it
 #[derive(Debug, Clone)]
@@ -136,6 +121,7 @@ pub struct JournalLines(Vec<JournalLine>);
 
 impl JournalLines {
     /// Create valid set of balanced journal lines. Given lines must be balanced or an account given against which to balance them with a new line.
+    /// Also sorts the lines to be debits first as is customary.
     pub fn new(
         mut lines: Vec<JournalLine>,
         balance_account: Option<JournalAccount>,
@@ -162,6 +148,15 @@ impl JournalLines {
         } else if total_debit != total_credit {
             bail!("Journal credits and debits are not equal and no balance account given");
         };
+        lines.sort_by(|a, b| {
+            if a.1.is_debit() && b.1.is_credit() {
+                Ordering::Less
+            } else if a.1.is_credit() && b.1.is_debit() {
+                Ordering::Greater
+            } else {
+                Ordering::Equal
+            }
+        });
         Ok(Self(lines))
     }
 }
@@ -219,14 +214,24 @@ impl JournalEntry {
 impl fmt::Display for JournalEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for JournalLine(account, amount) in self.lines() {
-            write!(
+            let acc_pad = 25;
+            let amt_pad = 12;
+            let date = self.date();
+            let account = account.to_string();
+            let debit = amount
+                .as_debit()
+                .as_ref()
+                .map(Money::to_string)
+                .unwrap_or_default();
+            let credit = amount
+                .as_credit()
+                .as_ref()
+                .map(Money::to_string)
+                .unwrap_or_default();
+            let memo = self.memo.clone().unwrap_or_default();
+            writeln!(
                 f,
-                "{} | {:25} | {} | {} | {}",
-                self.date,
-                account.to_string(),
-                amount,
-                self.memo.clone().unwrap_or_default(),
-                self.r#ref
+                "{date} | {account:acc_pad$} | {debit:>amt_pad$} | {credit:>amt_pad$} | {memo}",
             )?
         }
         Ok(())

@@ -108,7 +108,7 @@ async fn main() -> Result<()> {
             // }
             journal_entries.sort_by_key(|x| x.date());
             journal_entries.into_iter().for_each(|entry| {
-                println!("{}", entry);
+                print!("{}", entry);
             });
         // } else if matches.subcommand_matches("balances").is_some() {
         //     let balances = ledger
