@@ -135,7 +135,11 @@ pub struct JournalEntry {
 pub struct JournalLines(Vec<JournalLine>);
 
 impl JournalLines {
-    pub fn new(lines: Vec<JournalLine>) -> Result<Self> {
+    /// Create valid set of balanced journal lines. Given lines must be balanced or an account given against which to balance them with a new line.
+    pub fn new(
+        mut lines: Vec<JournalLine>,
+        balance_account: Option<JournalAccount>,
+    ) -> Result<Self> {
         if lines.is_empty() {
             bail!("Journal lines cannot be empty");
         }
@@ -149,9 +153,15 @@ impl JournalLines {
                 (debit, credit)
             },
         );
-        if total_debit != total_credit {
-            bail!("Journal credits and debits are not equal")
-        }
+        if let Some(account) = balance_account {
+            if total_debit > total_credit {
+                lines.push(JournalLine(account, Credit(total_debit - total_credit)));
+            } else if total_credit > total_debit {
+                lines.push(JournalLine(account, Debit(total_credit - total_debit)));
+            };
+        } else if total_debit != total_credit {
+            bail!("Journal credits and debits are not equal and no balance account given");
+        };
         Ok(Self(lines))
     }
 }
@@ -174,17 +184,22 @@ impl IntoIterator for JournalLines {
 }
 
 impl JournalEntry {
+    /// Creates new `JournalEntry` given metadata, lines, and optional balance account.
+    ///
+    /// Will return Err if the lines are not balanced unless a balance account is given
+    /// against which the entry will be balanced with a new line.
     pub fn new(
         r#ref: &str,
         date: &NaiveDate,
         memo: Option<&str>,
         lines: &[JournalLine],
+        balance_account: Option<JournalAccount>,
     ) -> Result<Self> {
         Ok(JournalEntry {
             r#ref: r#ref.to_owned(),
             date: date.to_owned(),
             memo: memo.map(|s| s.to_owned()),
-            lines: JournalLines::new(lines.to_owned())?,
+            lines: JournalLines::new(lines.to_owned(), balance_account)?,
         })
     }
 

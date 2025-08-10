@@ -1,13 +1,11 @@
 use crate::money::Money;
-use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
-use std::convert::TryFrom;
-use std::{collections::HashMap, str::FromStr};
+use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Serialize)]
 #[serde(untagged)]
-pub enum SimpleOrExpandedLines {
+pub enum Lines {
     Simple(HashMap<String, Money>),
     Expanded(Vec<ExpandedLine>),
 }
@@ -26,19 +24,42 @@ pub struct Entry {
     pub r#type: Option<String>,
     pub date: String,
     pub memo: Option<String>,
-    pub debits: Option<SimpleOrExpandedLines>,
-    pub credits: Option<SimpleOrExpandedLines>,
+    pub credits: Option<Lines>,
+    pub debits: Option<Lines>,
     pub party: Option<String>,
     pub account: Option<String>,
     pub amount: Option<Money>,
-    pub items: Option<Vec<Item>>,
+    pub items: Option<Items>,
     pub extras: Option<Vec<Extra>>,
     pub payment: Option<Payment>,
     pub repeat: Option<String>,
     pub end: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Clone, Serialize)]
+#[serde(untagged)]
+pub enum Items {
+    Simple(HashMap<String, Money>),
+    Expanded(Vec<Item>),
+}
+
+impl Items {
+    pub fn as_expanded(&self) -> Vec<Item> {
+        match self {
+            Self::Simple(lines) => lines
+                .into_iter()
+                .map(|(description, amount)| Item {
+                    description: Some(description.to_owned()),
+                    amount: Some(amount.to_owned()),
+                    ..Default::default()
+                })
+                .collect(),
+            Self::Expanded(items) => items.to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
 pub struct Item {
     pub description: Option<String>,
     pub code: Option<String>,    // include if tracking

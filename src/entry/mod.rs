@@ -3,15 +3,13 @@ pub mod journal;
 mod payment;
 pub mod raw;
 
-use crate::account::Sign;
 use crate::money::Money;
 use anyhow::{Context, Error, Result};
 use chrono::prelude::*;
-use futures::stream::BoxStream;
 use invoice::{default_monthly_rrule, Invoice};
 use journal::{JournalAmount, JournalEntry, JournalLine, JournalLines};
 use payment::*;
-use raw::{ExpandedLine, SimpleOrExpandedLines};
+use raw::{ExpandedLine, Lines};
 use rrule::RRule;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
@@ -121,7 +119,7 @@ impl Entry {
     pub fn party(&self) -> Option<String> {
         match &self.body {
             Body::PaymentSent(p) | Body::PaymentReceived(p) => Some(p.party.clone()),
-            Body::PurchaseInvoice(i) | Body::SaleInvoice(i) => Some(i.party.clone()),
+            Body::PurchaseInvoice(i) | Body::SaleInvoice(i) => Some(i.party().clone()),
             _ => None,
         }
     }
@@ -151,78 +149,68 @@ impl Entry {
     /// or many from recurring dates
     fn to_journal_entry_for_date(&self, date: NaiveDate) -> Result<JournalEntry> {
         match self.body.clone() {
-            Body::PurchaseInvoice(invoice) => Ok(JournalEntry::new(
-                &self.id,
-                &date,
-                self.memo.as_deref(),
-                &Self::lines_from_invoice(invoice, Sign::Debit)?,
-            )?),
+            Body::PurchaseInvoice(invoice) => {
+                let bill_lines = invoice
+                    .bill_lines()?
+                    .into_iter()
+                    .map(|l| JournalLine(l.0, Debit(l.1)));
+                let payment_lines = invoice
+                    .payment_lines()?
+                    .into_iter()
+                    .map(|l| JournalLine(l.0, Credit(l.1)));
+                let lines = bill_lines.chain(payment_lines).collect::<Vec<_>>();
+
+                JournalEntry::new(
+                    &self.id,
+                    &date,
+                    self.memo.as_deref(),
+                    &lines,
+                    Some("Accounts Payable".to_string()),
+                )
+            }
             Body::PaymentSent(payment) => JournalEntry::new(
                 &self.id,
                 &date,
                 self.memo.as_deref(),
                 &[
                     JournalLine(payment.account, Credit(payment.amount)),
-                    JournalLine(String::from("Accounts Payable"), Debit(payment.amount)),
+                    JournalLine("Accounts Payable".to_string(), Debit(payment.amount)),
                 ],
+                None,
             ),
-            Body::SaleInvoice(invoice) => Ok(JournalEntry::new(
-                &self.id,
-                &date,
-                self.memo.as_deref(),
-                &Self::lines_from_invoice(invoice, Sign::Credit)?,
-            )?),
+            Body::SaleInvoice(invoice) => {
+                let bill_lines = invoice
+                    .bill_lines()?
+                    .into_iter()
+                    .map(|l| JournalLine(l.0, Credit(l.1)));
+                let payment_lines = invoice
+                    .payment_lines()?
+                    .into_iter()
+                    .map(|l| JournalLine(l.0, Debit(l.1)));
+                let lines = bill_lines.chain(payment_lines).collect::<Vec<_>>();
+
+                JournalEntry::new(
+                    &self.id,
+                    &date,
+                    self.memo.as_deref(),
+                    &lines,
+                    Some("Accounts Receivable".to_string()),
+                )
+            }
             Body::PaymentReceived(payment) => JournalEntry::new(
                 &self.id,
                 &date,
                 self.memo.as_deref(),
                 &[
                     JournalLine(payment.account, Debit(payment.amount)),
-                    JournalLine(String::from("Accounts Receivable"), Credit(payment.amount)),
+                    JournalLine("Accounts Receivable".to_string(), Credit(payment.amount)),
                 ],
+                None,
             ),
             Body::Journal(lines) => {
-                JournalEntry::new(&self.id, &date, self.memo.as_deref(), &lines)
+                JournalEntry::new(&self.id, &date, self.memo.as_deref(), &lines, None)
             }
         }
-    }
-
-    fn lines_from_invoice(invoice: Invoice, sign: Sign) -> Result<JournalLines> {
-        let (amount_contructor, contra_amount_contructor): (
-            fn(Money) -> JournalAmount,
-            fn(Money) -> JournalAmount,
-        ) = match sign {
-            Sign::Debit => (Debit, Credit),
-            Sign::Credit => (Credit, Debit),
-        };
-        let mut entries = invoice
-            .items
-            .iter()
-            .map(|item| {
-                Ok(JournalLine(
-                    item.account.clone(),
-                    amount_contructor(item.total()?),
-                ))
-            })
-            .collect::<Result<Vec<JournalLine>>>()?; // TODO include inventory entries if tracking
-        let contra_amount = contra_amount_contructor(
-            invoice
-                .items
-                .iter()
-                .fold(Money::try_from(0.0), |acc, item| Ok(acc? + item.total()?))?,
-        );
-        let contra_account = match sign {
-            Sign::Debit => String::from("Accounts Payable"),
-            Sign::Credit => String::from("Accounts Receivable"),
-        };
-        let contra_entry = match invoice.payment {
-            None => JournalLine(contra_account, contra_amount),
-            // TODO this doesn't appear to take into account payment amount separate from
-            // contra_amount
-            Some(payment) => JournalLine(payment.account, contra_amount),
-        };
-        entries.push(contra_entry);
-        JournalLines::new(entries)
     }
 }
 
@@ -261,40 +249,36 @@ impl TryFrom<raw::Entry> for Entry {
                     // TODO refactor this out to reusable function
                     let debit_lines: Box<dyn Iterator<Item = Result<JournalLine>>> =
                         match raw_entry.debits {
-                            Some(SimpleOrExpandedLines::Simple(hashmap)) => {
+                            Some(Lines::Simple(hashmap)) => {
                                 Box::new(hashmap.into_iter().map(|(account, amount)| {
                                     Ok(JournalLine(account.to_owned(), Debit(amount)))
                                 }))
                             }
-                            Some(SimpleOrExpandedLines::Expanded(expanded)) => {
-                                Box::new(expanded.into_iter().map(
-                                    |ExpandedLine { account, amount }| {
-                                        Ok(JournalLine(account.to_owned(), Debit(amount)))
-                                    },
-                                ))
-                            }
+                            Some(Lines::Expanded(expanded)) => Box::new(expanded.into_iter().map(
+                                |ExpandedLine { account, amount }| {
+                                    Ok(JournalLine(account.to_owned(), Debit(amount)))
+                                },
+                            )),
                             None => Box::new(std::iter::empty()),
                         };
                     let credit_lines: Box<dyn Iterator<Item = Result<JournalLine>>> =
                         match raw_entry.credits {
-                            Some(SimpleOrExpandedLines::Simple(hashmap)) => {
+                            Some(Lines::Simple(hashmap)) => {
                                 Box::new(hashmap.into_iter().map(|(account, amount)| {
                                     Ok(JournalLine(account.to_owned(), Credit(amount)))
                                 }))
                             }
-                            Some(SimpleOrExpandedLines::Expanded(expanded)) => {
-                                Box::new(expanded.into_iter().map(
-                                    |ExpandedLine { account, amount }| {
-                                        Ok(JournalLine(account.to_owned(), Credit(amount)))
-                                    },
-                                ))
-                            }
+                            Some(Lines::Expanded(expanded)) => Box::new(expanded.into_iter().map(
+                                |ExpandedLine { account, amount }| {
+                                    Ok(JournalLine(account.to_owned(), Credit(amount)))
+                                },
+                            )),
                             None => Box::new(std::iter::empty()),
                         };
                     let lines = credit_lines
                         .chain(debit_lines)
                         .collect::<Result<Vec<_>>>()?;
-                    Ok(Body::Journal(JournalLines::new(lines)?))
+                    Ok(Body::Journal(JournalLines::new(lines, None)?))
                 }
                 Some(s) => Err(Error::msg(format!("{} not a valid Entry type", s))),
             }?,
@@ -326,11 +310,25 @@ impl From<Entry> for raw::Entry {
                 // TODO check to see if this is a case where expanded lines should be used
                 raw::Entry {
                     r#type: None,
-                    debits: Some(SimpleOrExpandedLines::Simple(debits)),
-                    credits: Some(SimpleOrExpandedLines::Simple(credits)),
+                    debits: Some(Lines::Simple(debits)),
+                    credits: Some(Lines::Simple(credits)),
                     ..Default::default()
                 }
             }
+            Body::PaymentSent(payment) => raw::Entry {
+                r#type: Some("Payment Sent".to_string()),
+                party: Some(payment.party),
+                account: Some(payment.account),
+                amount: Some(payment.amount),
+                ..Default::default()
+            },
+            Body::PaymentReceived(payment) => raw::Entry {
+                r#type: Some("Payment Received".to_string()),
+                party: Some(payment.party),
+                account: Some(payment.account),
+                amount: Some(payment.amount),
+                ..Default::default()
+            },
             // TODO handle all the other types
             _ => {
                 todo!()
@@ -374,7 +372,7 @@ mod entry_tests {
     use super::*;
     use indoc::indoc;
 
-    use std::fs::read_to_string;
+    
 
     #[test]
     fn parse_journal_entry() -> Result<()> {
@@ -467,6 +465,125 @@ mod entry_tests {
         assert_eq!(
             entry.amount_of_account("Accounts Payable").unwrap(),
             JournalAmount::debit(60.50)?
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_invoice_entry() -> Result<()> {
+        let entry: Entry = indoc! {"
+            type: Purchase Invoice
+            date: 2020-01-01
+            party: ACME Business Services
+            account: Operating Expenses
+            items:
+              - description: Business Services
+                amount: 100
+        "}
+        .parse()?;
+
+        dbg!(&entry);
+        assert_eq!(entry.date(), "2020-01-01".parse()?);
+        assert_eq!(entry.memo(), None);
+        assert_eq!(entry.party(), Some("ACME Business Services".to_string()));
+
+        assert_eq!(
+            entry.amount_of_account("Accounts Payable").unwrap(),
+            JournalAmount::credit(100.00)?
+        );
+        assert_eq!(
+            entry.amount_of_account("Operating Expenses").unwrap(),
+            JournalAmount::debit(100.00)?
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_invoice_simple_items() -> Result<()> {
+        // if items is map, then treat as description -> amount
+        let entry: Entry = indoc! {"
+            type: Purchase Invoice
+            date: 2021-01-01
+            party: ACME Business Services
+            account: Operating Expenses
+            items:
+              Paperclips: 0.05
+        "}
+        .parse()?;
+
+        dbg!(&entry);
+        assert_eq!(entry.date(), "2021-01-01".parse()?);
+        assert_eq!(entry.memo(), None);
+
+        assert_eq!(
+            entry.amount_of_account("Accounts Payable").unwrap(),
+            JournalAmount::credit(0.05)?
+        );
+        assert_eq!(
+            entry.amount_of_account("Operating Expenses").unwrap(),
+            JournalAmount::debit(0.05)?
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_invoice_no_items() -> Result<()> {
+        // if not items, use given total amount
+        let entry: Entry = indoc! {"
+            type: Purchase Invoice
+            date: 2021-01-01
+            party: ACME Business Services
+            account: Operating Expenses
+            amount: 0.05
+        "}
+        .parse()?;
+
+        dbg!(&entry);
+        assert_eq!(entry.date(), "2021-01-01".parse()?);
+        assert_eq!(entry.memo(), None);
+
+        assert_eq!(
+            entry.amount_of_account("Accounts Payable").unwrap(),
+            JournalAmount::credit(0.05)?
+        );
+        assert_eq!(
+            entry.amount_of_account("Operating Expenses").unwrap(),
+            JournalAmount::debit(0.05)?
+        );
+
+        Ok(())
+    }
+
+    // TODO decide variations
+    #[test]
+    #[ignore]
+    fn parse_invoice_condensed() -> Result<()> {
+        // Not sure if I like this concept
+        let entry: Entry = indoc! {"
+            type: Purchase Invoice
+            date: 2021-01-01
+            party: ACME Business Services
+            items:
+              Operating Expenses: 0.05
+            payments:
+              Bank: 0.05
+        "}
+        .parse()?;
+
+        dbg!(&entry);
+        assert_eq!(entry.date(), "2021-01-01".parse()?);
+        assert_eq!(entry.memo(), None);
+
+        assert_eq!(
+            entry.amount_of_account("Bank").unwrap(),
+            JournalAmount::credit(0.05)?
+        );
+        assert_eq!(
+            entry.amount_of_account("Operating Expenses").unwrap(),
+            JournalAmount::debit(0.05)?
         );
 
         Ok(())

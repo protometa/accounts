@@ -108,7 +108,10 @@ impl Serialize for Money {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&self.0.to_string())
+        // TODO support other currencies
+
+        let m = self.0.to_string();
+        serializer.serialize_str(&format!("${m}"))
     }
 }
 

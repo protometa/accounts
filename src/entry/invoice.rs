@@ -1,4 +1,4 @@
-use super::raw;
+use super::{journal::JournalAccount, raw};
 use crate::money::Money;
 use anyhow::{bail, Context, Error, Result};
 use chrono::prelude::*;
@@ -9,10 +9,12 @@ use std::convert::{TryFrom, TryInto};
 
 #[derive(Debug, Clone)]
 pub struct Invoice {
-    pub party: String,
-    pub items: Vec<InvoiceItem>,
-    pub extras: Option<Vec<InvoiceExtra>>,
-    pub payment: Option<InvoicePayment>,
+    party: String,
+    account: JournalAccount,
+    amount: Option<Money>,
+    items: Vec<InvoiceItem>,
+    extras: Option<Vec<InvoiceExtra>>,
+    payment: Option<InvoicePayment>,
 }
 
 pub fn default_monthly_rrule(date: NaiveDate) -> RRuleProperties {
@@ -21,6 +23,38 @@ pub fn default_monthly_rrule(date: NaiveDate) -> RRuleProperties {
         UTC.from_utc_datetime(&date.and_hms(0, 0, 0)),
     )
     .by_month_day(vec![date.day().try_into().unwrap()]) // unwrap ok, always <= 31
+}
+
+impl Invoice {
+    pub fn party(&self) -> String {
+        self.party.clone()
+    }
+
+    pub fn bill_lines(&self) -> Result<Vec<(String, Money)>> {
+        if !self.items.is_empty() {
+            self.items
+                .iter()
+                .map(|i| Ok((i.account.clone(), i.total()?)))
+                .collect::<Result<Vec<_>>>()
+            // TODO incorporate extras eventually
+        } else {
+            let amount = self
+                .amount
+                .context("Items empty and no amount in invoice")?;
+            Ok(vec![(self.account.clone(), amount)])
+        }
+    }
+
+    // there may be multiple payments on an invoice in future
+    pub fn payment_lines(&self) -> Result<Vec<(String, Money)>> {
+        if let Some(payment) = self.payment.clone() {
+            Ok(vec![(payment.account, payment.amount)])
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    // TODO impl inventory tracking methods
 }
 
 impl TryFrom<raw::Entry> for Invoice {
@@ -33,18 +67,25 @@ impl TryFrom<raw::Entry> for Invoice {
             items,
             extras,
             payment,
+            amount,
             ..
         }: raw::Entry,
     ) -> Result<Self> {
         let account = account.context("Account required for Invoice")?;
+        if !(items.is_some() ^ amount.is_some()) {
+            bail!("Either items or amount required for Invoice")
+        }
         Ok(Self {
             party: party.context("Party required for Invoice")?,
+            account: account.clone(),
+            amount: if items.is_none() { amount } else { None },
             items: items
-                .context("Items not listed on Invoice")?
-                .into_iter()
-                .map(|mut raw_item| {
-                    raw_item.account.get_or_insert(account.clone());
-                    raw_item.try_into()
+                .iter() // iterate over Option to flatten and collect
+                .flat_map(|items| {
+                    items.as_expanded().into_iter().map(|mut raw_item| {
+                        raw_item.account.get_or_insert(account.clone());
+                        raw_item.try_into()
+                    })
                 })
                 .collect::<Result<Vec<InvoiceItem>>>()?,
             extras: extras

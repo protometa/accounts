@@ -163,7 +163,7 @@ impl BankTxs {
                 .is_ok_and(|g| g.match_entry(&entry).unwrap_or(false))
         });
         // must be reversed (desc order) so removing lower indexes don't invalidate higher indexes
-        is.rev().map(|i| self.txs.swap_remove(i)).collect()
+        is.rev().map(|i| self.txs.remove(i)).collect()
     }
 
     /// This will generate new entries from remaining txs after matching and removing

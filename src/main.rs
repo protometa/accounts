@@ -183,8 +183,7 @@ async fn main() -> Result<()> {
                 })();
 
                 match entry {
-                    Ok(entry) => println!("Entry generated:\n{entry}---"),
-                    // TODO figure out how to show tx in error
+                    Ok(entry) => println!("# Entry generated from: {tx:?}:\n{entry}---"),
                     Err(err) => eprintln!("ERROR generating:\n{tx:?}:\n{err}\n---"),
                 }
             })
