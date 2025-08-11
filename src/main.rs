@@ -3,8 +3,12 @@ use accounts::{chart_of_accounts::ChartOfAccounts, *};
 use anyhow::Result;
 use bank_txs::BankTxs;
 use clap::{Arg, Command};
-use entry::{journal::JournalEntry, raw, Entry};
+use entry::{
+    journal::{JournalAmount, JournalEntry},
+    raw, Entry,
+};
 use futures::{future, stream::TryStreamExt};
+use money::Money;
 use std::fs;
 
 #[async_std::main]
@@ -110,23 +114,25 @@ async fn main() -> Result<()> {
             journal_entries.into_iter().for_each(|entry| {
                 print!("{}", entry);
             });
-        // } else if matches.subcommand_matches("balances").is_some() {
-        //     let balances = ledger
-        //         .balances(matches.value_of("party").map(ToOwned::to_owned))
-        //         .await?;
-        //     let total = balances.iter().fold(
-        //         journal_entry::JournalAmount::default(),
-        //         |mut acc, amount| {
-        //             acc += *amount.1;
-        //             acc
-        //         },
-        //     );
-        //     balances.iter().for_each(|(account, amount)| {
-        //         println!("{:25} | {}", account, amount);
-        //     });
-        //     if total != journal_entry::JournalAmount::default() {
-        //         println!("ERROR                     | {}", total);
-        //     }
+        } else if matches.subcommand_matches("balances").is_some() {
+            let balances = ledger.balances().await?;
+            let total = balances
+                .iter()
+                .fold(JournalAmount::default(), |mut acc, amount| {
+                    acc += *amount.1;
+                    acc
+                });
+            let acc_pad = 25;
+            let amt_pad = 12;
+            balances.iter().for_each(|(account, amount)| {
+                let amt_string = amount.to_row_string(amt_pad);
+                println!("{account:acc_pad$} | {amt_string}");
+            });
+            // if accounts do not balance, show difference as error
+            if total != JournalAmount::default() {
+                let total_string = total.to_row_string(amt_pad);
+                println!("{:acc_pad$} | {total_string}", "ERROR");
+            }
         } else if let Some(report) = matches.subcommand_matches("report") {
             if let (Some(spec), Some(chart)) = (
                 report.value_of("report spec"),

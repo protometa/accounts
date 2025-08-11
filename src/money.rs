@@ -137,7 +137,7 @@ impl<'de> Visitor<'de> for MyValueVisitor {
     where
         E: de::Error,
     {
-        Money::from_str(&value.to_owned())
+        Money::from_str(value)
             .map_err(|_| serde::de::Error::custom("Failed to convert string to Money"))
     }
 

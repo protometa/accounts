@@ -36,14 +36,14 @@ impl JournalAmount {
     }
     pub fn as_debit(&self) -> Option<Money> {
         match self {
-            Debit(money) => Some(money.clone()),
+            Debit(money) => Some(*money),
             Credit(_) => None,
         }
     }
     pub fn as_credit(&self) -> Option<Money> {
         match self {
             Debit(_) => None,
-            Credit(money) => Some(money.clone()),
+            Credit(money) => Some(*money),
         }
     }
     pub fn is_debit(&self) -> bool {
@@ -67,10 +67,33 @@ impl JournalAmount {
     /// Absolute amount
     pub fn abs_amount(&self) -> Money {
         match self {
-            Debit(money) => money.clone(),
-            Credit(money) => money.clone(),
+            Debit(money) => *money,
+            Credit(money) => *money,
         }
     }
+
+    pub fn to_row_string(&self, pad: usize) -> String {
+        match self {
+            Debit(money) => format!("{:>pad$} | {:>pad$}", money.to_string(), ""),
+            Credit(money) => format!("{:>pad$} | {:>pad$}", "", money.to_string()),
+        }
+    }
+}
+
+#[test]
+fn test_row_string() -> Result<()> {
+    let dr = JournalAmount::debit(100.00)?;
+    let cr = JournalAmount::credit(50.00)?;
+    let dr_row = dr.to_row_string(10);
+    let cr_row = cr.to_row_string(10);
+
+    dbg!(&dr_row);
+    dbg!(&cr_row);
+
+    assert_eq!(dr_row, "   $100.00 |           ");
+    assert_eq!(cr_row, "           |     $50.00");
+
+    Ok(())
 }
 
 impl TryInto<f64> for JournalAmount {
@@ -214,25 +237,12 @@ impl JournalEntry {
 impl fmt::Display for JournalEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for JournalLine(account, amount) in self.lines() {
-            let acc_pad = 25;
-            let amt_pad = 12;
             let date = self.date();
+            let acc_pad = 25;
             let account = account.to_string();
-            let debit = amount
-                .as_debit()
-                .as_ref()
-                .map(Money::to_string)
-                .unwrap_or_default();
-            let credit = amount
-                .as_credit()
-                .as_ref()
-                .map(Money::to_string)
-                .unwrap_or_default();
+            let amt_string = amount.to_row_string(12);
             let memo = self.memo.clone().unwrap_or_default();
-            writeln!(
-                f,
-                "{date} | {account:acc_pad$} | {debit:>amt_pad$} | {credit:>amt_pad$} | {memo}",
-            )?
+            writeln!(f, "{date} | {account:acc_pad$} | {amt_string} | {memo}",)?
         }
         Ok(())
     }

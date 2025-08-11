@@ -47,7 +47,7 @@ impl Items {
     pub fn as_expanded(&self) -> Vec<Item> {
         match self {
             Self::Simple(lines) => lines
-                .into_iter()
+                .iter()
                 .map(|(description, amount)| Item {
                     description: Some(description.to_owned()),
                     amount: Some(amount.to_owned()),

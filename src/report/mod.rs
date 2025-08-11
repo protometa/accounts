@@ -156,7 +156,7 @@ impl TryFrom<raw::ReportNode> for ReportNode {
             || Ok(Vec::new()),
             |tags| tags.iter().map(|t| Tag::new(t)).collect(),
         )?;
-        let names = raw_report.names.unwrap_or_else(Vec::new);
+        let names = raw_report.names.unwrap_or_default();
         let children = raw_report.breakdown.map_or_else(
             || Ok(Vec::new()),
             |raw_nodes| {
@@ -192,7 +192,7 @@ impl FromStr for ReportNode {
 
 impl fmt::Display for ReportNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let items = self.items().map_err(|_| std::fmt::Error::default());
+        let items = self.items().map_err(|_| std::fmt::Error);
         for item in items?.iter() {
             let mut indentation = (1..item.0.len()).fold(String::new(), |mut ident, _| {
                 ident.push_str("  ");
