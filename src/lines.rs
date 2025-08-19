@@ -1,14 +1,14 @@
 use async_std::fs::{self, File};
 use async_std::io::prelude::*;
-use async_std::io::{stdin, BufReader};
+use async_std::io::{BufReader, stdin};
 use async_walkdir::{DirEntry, WalkDir};
-use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::FutureExt;
+use futures::stream::{Stream, StreamExt, TryStreamExt};
 use std::io::{Error, ErrorKind, Result};
 use std::path::Path;
 
 /// Reads an entire dir of files by line
-fn dir_lines(dir: &str) -> impl Stream<Item = Result<String>> {
+fn dir_lines(dir: &str) -> impl Stream<Item = Result<String>> + use<> {
     WalkDir::new(dir)
         .try_filter_map(|dir_entry: DirEntry| async move {
             let path = dir_entry.path();

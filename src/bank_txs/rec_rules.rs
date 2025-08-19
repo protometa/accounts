@@ -1,7 +1,7 @@
 use super::BankTx;
-use crate::entry::{raw, Entry};
-use anyhow::{anyhow, bail, Context, Error, Ok, Result};
-use rule::{arg::Arg, json, Rule};
+use crate::entry::{Entry, raw};
+use anyhow::{Context, Error, Ok, Result, anyhow, bail};
+use rule::{Rule, arg::Arg, json};
 use serde::{Deserialize, Serialize};
 // use serde_yaml::Value;
 use crate::entry::journal::JournalAmount::{Credit, Debit};
@@ -315,10 +315,14 @@ impl GenEntry {
                 }
             }
             Some(s) => {
-                bail!("Invlid type {s:?} found for generated entry from template:\n{templated:?}\nWith values:\n{evaled:?}");
+                bail!(
+                    "Invlid type {s:?} found for generated entry from template:\n{templated:?}\nWith values:\n{evaled:?}"
+                );
             }
             None => {
-                bail!("Cound not determine type for generated entry from template:\n{templated:?}\nWith values:\n{evaled:?}");
+                bail!(
+                    "Cound not determine type for generated entry from template:\n{templated:?}\nWith values:\n{evaled:?}"
+                );
             }
         }
 
@@ -367,7 +371,9 @@ impl GenEntry {
     /// Used to match entries to rules
     /// Create a GeneratingEntry by applying tx to rules
     /// then attempt to match it to JournalEntry
-    pub fn match_entry(&self, entry: &Entry) -> Result<bool> {
+    /// On match the number of relevant lines is returned which is used to ensure
+    /// that the entry doesn't match to more txs than it should
+    pub fn match_entry(&self, entry: &Entry) -> Result<Option<usize>> {
         // TODO since rules can generate any type of entry, allow matching on other types
         // eg if party of payment entry doesn't match
 
@@ -378,23 +384,24 @@ impl GenEntry {
         // TODO get date from values or template to allow for expressions
         // TODO potentially just iterate over all available fields after evaluation and interpolation and return false on any mismatch - but may require serializing this given entry to match fields
         if self.tx.date != entry.date() {
-            return Ok(false);
+            return Ok(None);
         };
         if let Some(bank_account) = evaled.get("bank_account") {
-            if entry
-                .lines()?
-                .iter()
-                .filter(|l| l.0 == *bank_account && l.1 == self.tx.amount.invert())
-                .count()
-                == 0
+            let relevant_lines = entry.lines()?.into_iter().filter(|l| l.0 == *bank_account);
+
+            if relevant_lines
+                .clone()
+                .find(|l| l.1 == self.tx.amount.invert())
+                .is_none()
             {
-                return Ok(false);
+                return Ok(None);
+            } else {
+                return Ok(Some(relevant_lines.count()));
             }
         } else {
             // TODO currently bank_account value is required, but should also match on fully qualified account in templates
-            return Ok(false);
+            return Ok(None);
         }
-        Ok(true)
     }
 }
 
