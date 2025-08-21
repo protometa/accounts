@@ -4,9 +4,10 @@ mod payment;
 pub mod raw;
 
 use crate::money::Money;
+use JournalAmount::{Credit, Debit};
 use anyhow::{Context, Error, Result};
 use chrono::prelude::*;
-use invoice::{default_monthly_rrule, Invoice};
+use invoice::{Invoice, default_monthly_rrule};
 use journal::{JournalAmount, JournalEntry, JournalLine, JournalLines};
 use payment::*;
 use raw::{ExpandedLine, Lines};
@@ -16,7 +17,6 @@ use std::convert::{TryFrom, TryInto};
 use std::iter::{self, Iterator};
 use std::ops::AddAssign;
 use std::str::FromStr;
-use JournalAmount::{Credit, Debit};
 
 /// This is a fully valid entry.
 #[derive(Debug, Clone)]
@@ -371,8 +371,6 @@ impl FromStr for Entry {
 mod entry_tests {
     use super::*;
     use indoc::indoc;
-
-    
 
     #[test]
     fn parse_journal_entry() -> Result<()> {
