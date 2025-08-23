@@ -4,11 +4,12 @@ use anyhow::Result;
 use bank_txs::BankTxs;
 use clap::{Arg, Command};
 use entry::{
+    Entry,
     journal::{JournalAmount, JournalEntry},
-    raw, Entry,
+    raw,
 };
-use futures::{future, stream::TryStreamExt};
-use money::Money;
+use futures::{StreamExt, future, stream::TryStreamExt};
+use itertools::Itertools;
 use std::fs;
 
 #[async_std::main]
@@ -27,15 +28,26 @@ async fn main() -> Result<()> {
                 .default_value("./")
                 .takes_value(true),
         )
-        .arg(
-            Arg::new("party")
-                .short('p')
-                .long("party")
-                .help("Commandlies commands to entries filtered by party")
-                .value_name("PARTY")
-                .takes_value(true),
+        .subcommand(
+            Command::new("journal")
+                .about("Shows journal")
+                .arg(
+                    Arg::new("account")
+                        .short('a')
+                        .long("account")
+                        .help("Account filter")
+                        .value_name("ACCOUNT")
+                        .takes_value(true),
+                )
+                .arg(
+                    Arg::new("party")
+                        .short('p')
+                        .long("party")
+                        .help("Party filter")
+                        .value_name("PARTY")
+                        .takes_value(true),
+                ),
         )
-        .subcommand(Command::new("journal").about("Shows journal"))
         .subcommand(Command::new("balances").about("Shows account balances"))
         .subcommand(
             Command::new("report")
@@ -94,25 +106,25 @@ async fn main() -> Result<()> {
         )
         .get_matches();
 
-    if let Some(entries) = matches.value_of("entries") {
-        let ledger = if entries == "-" {
+    if let Some(entries_arg) = matches.value_of("entries") {
+        let ledger = if entries_arg == "-" {
             Ledger::new(None)
         } else {
-            Ledger::new(Some(entries))
+            Ledger::new(Some(entries_arg))
         };
-        if matches.subcommand_matches("journal").is_some() {
+        if let Some(journal) = matches.subcommand_matches("journal") {
             // TODO walk dir sorted and add check to assert date order and process this iteratively instead of collecting
             // TODO solve the problem of emitting recurring entries in order
-            let mut journal_entries: Vec<JournalEntry> = ledger.journal().try_collect().await?;
-            // if let Some(party) = matches.value_of("party") {
-            //     journal_entries = journal_entries
-            //         .into_iter()
-            //         .filter(|entry| entry.3.clone().map_or(false, |p| p == party))
-            //         .collect()
-            // }
+            let party = journal.value_of("party").map(String::from);
+            let account = journal.value_of("account").map(String::from);
+
+            let mut journal_entries: Vec<JournalEntry> = ledger
+                .journal_filtered(account, party)
+                .try_collect()
+                .await?;
             journal_entries.sort_by_key(|x| x.date());
             journal_entries.into_iter().for_each(|entry| {
-                print!("{}", entry);
+                print!("{entry}");
             });
         } else if matches.subcommand_matches("balances").is_some() {
             let balances = ledger.balances().await?;
@@ -122,7 +134,7 @@ async fn main() -> Result<()> {
                     acc += *amount.1;
                     acc
                 });
-            let acc_pad = 25;
+            let acc_pad = 32;
             let amt_pad = 12;
             balances.iter().for_each(|(account, amount)| {
                 let amt_string = amount.to_row_string(amt_pad);
@@ -165,6 +177,7 @@ async fn main() -> Result<()> {
 
             ledger
                 .entries()
+                // TODO use filters on entry method
                 .try_filter(|entry| {
                     let has_account = entry.amount_of_account(account).is_some();
                     future::ready(has_account)
