@@ -8,10 +8,11 @@ pub mod report;
 
 use anyhow::{Error, Result};
 use chart_of_accounts::ChartOfAccounts;
+use chrono::NaiveDate;
 use entry::Entry;
 use entry::journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine};
 use futures::future::{self, Future};
-use futures::stream::{self, Stream, TryStreamExt};
+use futures::stream::{self, BoxStream, TryStreamExt};
 use futures::{StreamExt, TryStream};
 use lines::lines;
 use lines_ext::LinesExt;
@@ -19,7 +20,6 @@ use report::ReportNode;
 use std::borrow::ToOwned;
 use std::collections::HashMap;
 use std::ops::AddAssign;
-use std::pin::Pin;
 
 // TODO explore using pinned stream instead of attaching everything to this struct
 pub struct Ledger {
@@ -28,17 +28,15 @@ pub struct Ledger {
 
 type Balances = HashMap<JournalAccount, JournalAmount>;
 
-type EntriesStream = Pin<Box<dyn Stream<Item = Result<Entry>> + Send>>;
-type LinesStream = Pin<Box<dyn Stream<Item = Result<String, std::io::Error>> + Send>>;
 pub fn entries_from_lines(
-    lines_stream: LinesStream,
+    lines_stream: BoxStream<'_, Result<String, std::io::Error>>,
     // filter by account
-    account: Option<String>,
+    account: Option<String>, // TODO use Option<&str>?
     // filter by party
     party: Option<String>,
-) -> EntriesStream {
+) -> BoxStream<'_, Result<Entry>> {
     // let l = lines(Some("".to_string()));
-    let stream = lines_stream
+    lines_stream
         // remove lines starting with #
         .try_filter(|s| future::ready(!s.to_owned().trim().starts_with("#")))
         .chunk_by_line("---")
@@ -61,8 +59,24 @@ pub fn entries_from_lines(
                     .clone()
                     .is_none_or(|af| entry.amount_of_account(&af).is_some()),
             )
-        });
-    Box::pin(stream)
+        })
+        .boxed()
+}
+
+fn balances_from_journal_lines(
+    lines: BoxStream<'_, Result<JournalLine>>,
+) -> impl Future<Output = Result<Balances>> + '_ {
+    lines.try_fold(
+        HashMap::new(),
+        |mut acc, JournalLine(account, amount)| async move {
+            acc.entry(account.clone())
+                .and_modify(|total: &mut JournalAmount| {
+                    total.add_assign(amount);
+                })
+                .or_insert(amount);
+            Ok(acc)
+        },
+    )
 }
 
 impl Ledger {
@@ -74,9 +88,7 @@ impl Ledger {
     }
 
     /// Parse own stream of lines into `Entry`s
-    pub fn entries(
-        &self,
-    ) -> impl TryStream<Item = Result<Entry>, Ok = Entry, Error = anyhow::Error> + '_ {
+    pub fn entries(&self) -> BoxStream<'_, Result<Entry>> {
         self.entries_filtered(None, None)
     }
 
@@ -87,8 +99,8 @@ impl Ledger {
         account: Option<String>,
         // filter by party
         party: Option<String>,
-    ) -> impl TryStream<Item = Result<Entry>, Ok = Entry, Error = anyhow::Error> + '_ {
-        entries_from_lines(Box::pin(lines(self.path.clone())), account, party)
+    ) -> BoxStream<'_, Result<Entry>> {
+        entries_from_lines(lines(self.path.clone()).boxed(), account, party)
     }
 
     /// Convert own stream of `Entry`s into `JournalEntry`s
@@ -106,32 +118,63 @@ impl Ledger {
         account: Option<String>,
         // filter by party
         party: Option<String>,
-    ) -> impl TryStream<Item = Result<JournalEntry>, Ok = JournalEntry, Error = anyhow::Error> + '_
-    {
+    ) -> BoxStream<'_, Result<JournalEntry>> {
         self.entries_filtered(account, party)
             .and_then(
-                |entry| async move { Ok(stream::iter(entry.to_journal_entries(None)?).map(Ok)) },
+                |entry| async move { Ok(stream::iter(entry.to_journal_entries(None)?).map(Ok)) }, // TODO pass in until date
             )
             .try_flatten()
+            .boxed()
     }
 
     /// Get balances for each account appearing in own stream of `JournalEntry`s
     pub fn balances(&self) -> impl Future<Output = Result<Balances>> + '_ {
-        // TODO: work on set of given JournalLines and use for payable/recievable too
-        self.journal()
+        self.balances_filtered(None, None)
+    }
+
+    pub fn balances_filtered(
+        &self,
+        account: Option<String>,
+        party: Option<String>,
+    ) -> impl Future<Output = Result<Balances>> + '_ {
+        let lines = self
+            .journal_filtered(account, party)
             .and_then(|entry| async move { Ok(stream::iter(entry.lines()).map(Ok)) })
             .try_flatten()
-            .try_fold(
-                HashMap::new(),
-                |mut acc, JournalLine(account, amount)| async move {
-                    acc.entry(account.clone())
-                        .and_modify(|total: &mut JournalAmount| {
-                            total.add_assign(amount);
-                        })
-                        .or_insert(amount);
-                    Ok(acc)
-                },
-            )
+            .boxed();
+
+        balances_from_journal_lines(lines)
+    }
+
+    pub fn journal_lines_filtered(
+        &self,
+        account: Option<String>,
+        party: Option<String>,
+    ) -> BoxStream<'_, Result<JournalLine>> {
+        self.journal_filtered(account, party)
+            .and_then(|entry| future::ready(Ok(stream::iter(entry.lines()).map(Ok))))
+            .try_flatten()
+            .boxed()
+    }
+
+    /// get journal lines with entry party in place of given account
+    /// e.g. for accounts payable/receivable
+    pub fn journal_lines_with_party(
+        &self,
+        until: Option<NaiveDate>,
+        account: JournalAccount,
+    ) -> BoxStream<'_, Result<JournalLine>> {
+        self.entries_filtered(Some(account.clone()), None)
+            .and_then(move |entry| {
+                future::ready(Ok(stream::iter(
+                    entry
+                        .journal_lines_with_party(until, account.clone())
+                        .unwrap_or_default(),
+                )
+                .map(Ok)))
+            })
+            .try_flatten()
+            .boxed()
     }
 
     /// Run report to get total breakdowns of own balances based on given `ChartOfAccounts` and report spec
@@ -151,71 +194,23 @@ impl Ledger {
             })
     }
 
-    pub fn payable(&self)
-    // -> impl Future<Output = Result<HashMap<String, JournalAmount>>> + '_
-    {
-        unimplemented!("This function is not yet implemented");
-        // self.journal().try_fold(
-        //     HashMap::new(),
-        //     |mut acc, JournalEntry(_, account, amount, party)| async move {
-        //         if account == "Accounts Payable" {
-        //             if let Some(party) = party {
-        //                 acc.entry(party)
-        //                     .and_modify(|total: &mut JournalAmount| {
-        //                         total.add_assign(amount);
-        //                     })
-        //                     .or_insert(amount);
-        //             }
-        //         }
-        //         Ok(acc)
-        //     },
-        // )
+    pub fn payable(&self) -> impl Future<Output = Result<Balances>> + '_ {
+        let account = "Accounts Payable".to_string();
+        let party_lines = self.journal_lines_with_party(None, account); // TODO pass in until
+        balances_from_journal_lines(party_lines)
     }
 
-    pub fn receivable(&self)
-    // -> impl Future<Output = Result<HashMap<String, JournalAmount>>> + '_
-    {
-        unimplemented!("This function is not yet implemented");
-        // self.journal().try_fold(
-        //     HashMap::new(),
-        //     |mut acc, JournalEntry(_, account, amount, party)| async move {
-        //         if account == "Accounts Receivable" {
-        //             if let Some(party) = party {
-        //                 acc.entry(party)
-        //                     .and_modify(|total: &mut JournalAmount| {
-        //                         total.add_assign(amount);
-        //                     })
-        //                     .or_insert(amount);
-        //             }
-        //         }
-        //         Ok(acc)
-        //     },
-        // )
+    pub fn receivable(&self) -> impl Future<Output = Result<Balances>> + '_ {
+        let account = "Accounts Receivable".to_string();
+        let party_lines = self.journal_lines_with_party(None, account); // TODO pass in until
+        balances_from_journal_lines(party_lines)
     }
-
-    // pub fn reconcile(&self, account: JournalAccount, mut txs: BankTxs) {
-    //     dbg!(&account, &txs);
-    //     self.entries()
-    //         .try_filter(|entry| async move { entry.amount_of_account(account.as_str()).is_some() })
-    //         .try_for_each(|entry: Entry| async {
-    //             if let Some(tx) = txs.match_and_rm(entry.clone()) {
-    //                 println!("Tx:\n{tx:?}\nMatched with entry:\n{entry:?}");
-    //             }
-    //             // try to match each entry
-    //             // if !txs.match_and_rm(entry) {
-    //             //     // emit entry not found in bank for reconcilliation report
-    //             // }
-    //             // emit unmatch bank txs as new entries
-    //             Ok(())
-    //         });
-    // }
 }
 
 #[cfg(test)]
 mod entry_tests {
     use super::*;
-    
-    use async_std::stream::StreamExt;
+
     use indoc::indoc;
 
     const ENTRIES_STR: &str = indoc! {"

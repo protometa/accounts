@@ -48,7 +48,26 @@ async fn main() -> Result<()> {
                         .takes_value(true),
                 ),
         )
-        .subcommand(Command::new("balances").about("Shows account balances"))
+        .subcommand(
+            Command::new("balances")
+                .about("Shows account balances")
+                .arg(
+                    Arg::new("account")
+                        .short('a')
+                        .long("account")
+                        .help("Account filter")
+                        .value_name("ACCOUNT")
+                        .takes_value(true),
+                )
+                .arg(
+                    Arg::new("party")
+                        .short('p')
+                        .long("party")
+                        .help("Party filter")
+                        .value_name("PARTY")
+                        .takes_value(true),
+                ),
+        )
         .subcommand(
             Command::new("report")
                 .about("Runs report given report spec and chart of accounts")
@@ -126,8 +145,11 @@ async fn main() -> Result<()> {
             journal_entries.into_iter().for_each(|entry| {
                 print!("{entry}");
             });
-        } else if matches.subcommand_matches("balances").is_some() {
-            let balances = ledger.balances().await?;
+        } else if let Some(balances) = matches.subcommand_matches("balances") {
+            let party = balances.value_of("party").map(String::from);
+            let account = balances.value_of("account").map(String::from);
+
+            let balances = ledger.balances_filtered(account, party).await?;
             let total = balances
                 .iter()
                 .fold(JournalAmount::default(), |mut acc, amount| {
@@ -155,20 +177,20 @@ async fn main() -> Result<()> {
                 let report = ledger.run_report(&chart, &mut report).await?;
                 println!("{}", report)
             }
-            // } else if matches.subcommand_matches("payable").is_some() {
-            //     let payables = ledger.payable().await?;
-            //     let mut payables: Vec<_> = payables.iter().collect();
-            //     payables.sort_by_key(|x| x.0);
-            //     payables.iter().for_each(|(account, amount)| {
-            //         println!("{:25} | {}", account, amount);
-            //     });
-            // } else if matches.subcommand_matches("receivable").is_some() {
-            //     let receivables = ledger.receivable().await?;
-            //     let mut receivables: Vec<_> = receivables.iter().collect();
-            //     receivables.sort_by_key(|x| x.0);
-            //     receivables.iter().for_each(|(account, amount)| {
-            //         println!("{:25} | {}", account, amount);
-            //     });
+        } else if matches.subcommand_matches("payable").is_some() {
+            let payables = ledger.payable().await?;
+            let mut payables: Vec<_> = payables.iter().collect();
+            payables.sort_by_key(|x| x.0);
+            payables.iter().for_each(|(account, amount)| {
+                println!("{:32} | {}", account, amount.to_row_string(12));
+            });
+        } else if matches.subcommand_matches("receivable").is_some() {
+            let receivables = ledger.receivable().await?;
+            let mut receivables: Vec<_> = receivables.iter().collect();
+            receivables.sort_by_key(|x| x.0);
+            receivables.iter().for_each(|(account, amount)| {
+                println!("{:32} | {}", account, amount.to_row_string(12));
+            });
         } else if let Some(reconcile) = matches.subcommand_matches("reconcile") {
             let account = reconcile.value_of("account").unwrap(); // required
             let txs_file = reconcile.value_of("bank txs").unwrap(); // required

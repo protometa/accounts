@@ -8,7 +8,7 @@ use JournalAmount::{Credit, Debit};
 use anyhow::{Context, Error, Result};
 use chrono::prelude::*;
 use invoice::{Invoice, default_monthly_rrule};
-use journal::{JournalAmount, JournalEntry, JournalLine, JournalLines};
+use journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine, JournalLines};
 use payment::*;
 use raw::{ExpandedLine, Lines};
 use rrule::RRule;
@@ -127,6 +127,37 @@ impl Entry {
     /// Get journal lines
     pub fn lines(&self) -> Result<JournalLines> {
         Ok(self.to_journal_entry()?.lines())
+    }
+
+    /// get journal lines with entry party in place of given account
+    /// e.g. for accounts payable/receivable
+    pub fn journal_lines_with_party(
+        &self,
+        until: Option<NaiveDate>,
+        account: JournalAccount,
+    ) -> Result<Vec<JournalLine>> {
+        let party = self.party();
+        if let Some(party) = party {
+            let j_entries = self.to_journal_entries(until)?;
+            let party_lines = j_entries
+                .iter()
+                .flat_map(|j| {
+                    j.lines()
+                        .iter()
+                        .filter_map(|l| {
+                            if l.0 == account {
+                                Some(JournalLine(party.to_owned(), l.1))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            Ok(party_lines)
+        } else {
+            Ok(Vec::default())
+        }
     }
 
     /// Get all journal entries of possibly recurring entry
