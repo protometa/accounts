@@ -311,7 +311,7 @@ impl TryFrom<raw::Entry> for Entry {
                         .collect::<Result<Vec<_>>>()?;
                     Ok(Body::Journal(JournalLines::new(lines, None)?))
                 }
-                Some(s) => Err(Error::msg(format!("{} not a valid Entry type", s))),
+                Some(s) => Err(Error::msg(format!("{s} not a valid Entry type"))),
             }?,
         })
     }
@@ -380,7 +380,7 @@ impl FromStr for Entry {
     type Err = Error;
     fn from_str(doc: &str) -> Result<Self> {
         let mut raw_entry: raw::Entry = serde_yaml::from_str(doc)
-            .with_context(|| format!("Failed to deserialize Entry:\n{}", doc))?;
+            .with_context(|| format!("Failed to deserialize Entry:\n{doc}"))?;
         let id = format!(
             "{}|{}",
             raw_entry.date,
@@ -393,7 +393,7 @@ impl FromStr for Entry {
         raw_entry.id.get_or_insert(id.clone());
         let entry: Entry = raw_entry
             .try_into()
-            .with_context(|| format!("Failed to convert Entry: {}", id))?;
+            .with_context(|| format!("Failed to convert Entry: {id}"))?;
         Ok(entry)
     }
 }

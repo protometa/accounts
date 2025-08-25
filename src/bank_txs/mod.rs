@@ -10,12 +10,11 @@ use crate::{
     money::Money,
 };
 use anyhow::{Context, Error, Result, anyhow};
+use async_std::io::BufReader;
 use async_std::prelude::*;
 use async_std::{fs::File, io::ReadExt};
-use async_std::io::BufReader;
 use chrono::{Datelike, NaiveDate};
 use futures::{TryStreamExt, future};
-use itertools::Itertools;
 use rec_rules::RecRules;
 use serde::{
     Serialize, Serializer,

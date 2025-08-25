@@ -8,8 +8,7 @@ use entry::{
     journal::{JournalAmount, JournalEntry},
     raw,
 };
-use futures::{StreamExt, future, stream::TryStreamExt};
-use itertools::Itertools;
+use futures::{future, stream::TryStreamExt};
 use std::fs;
 
 #[async_std::main]
@@ -175,7 +174,7 @@ async fn main() -> Result<()> {
                 let chart = ChartOfAccounts::from_file(chart).await?;
                 let mut report = fs::read_to_string(spec)?.parse()?;
                 let report = ledger.run_report(&chart, &mut report).await?;
-                println!("{}", report)
+                println!("{report}")
             }
         } else if matches.subcommand_matches("payable").is_some() {
             let payables = ledger.payable().await?;

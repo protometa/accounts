@@ -71,9 +71,9 @@ impl ReportNode {
     fn matches(&self, account: &Account) -> bool {
         // account type must match if specified
         // in addition to matching on name or tags if they are specified
-        (self.types.is_empty() || self.types.iter().any(|t| *t == account.acc_type))
+        (self.types.is_empty() || self.types.contains(&account.acc_type))
             && ((self.names.is_empty() && self.tags.is_empty())
-                || (self.names.iter().any(|n| *n == account.name)
+                || (self.names.contains(&account.name)
                     || self.tags.iter().any(|t| account.has_tag(t))))
     }
 
@@ -92,7 +92,7 @@ impl ReportNode {
     }
 
     fn has_type(&self, t1: Type) -> bool {
-        self.types.iter().any(|t2| *t2 == t1)
+        self.types.contains(&t1)
     }
 
     pub fn items(&self) -> Result<Vec<LineItem>> {
@@ -182,7 +182,7 @@ impl FromStr for ReportNode {
 
     fn from_str(doc: &str) -> Result<Self, Self::Err> {
         let raw_report_node: raw::ReportNode = serde_yaml::from_str(doc)
-            .with_context(|| format!("Failed to deserialize Report:\n{}", doc))?;
+            .with_context(|| format!("Failed to deserialize Report:\n{doc}"))?;
         let report_node: ReportNode = raw_report_node
             .try_into()
             .with_context(|| "Failed to convert Report".to_string())?;
@@ -202,13 +202,13 @@ impl fmt::Display for ReportNode {
             indentation.push_str(&header);
             let indented_header = indentation;
             // apply sign to journal ammount
-            let total = match (item.1, item.2 .1) {
+            let total = match (item.1, item.2.1) {
                 (Credit, JournalAmount::Credit(money)) => money,
                 (Credit, JournalAmount::Debit(money)) => -money,
                 (Debit, JournalAmount::Debit(money)) => money,
                 (Debit, JournalAmount::Credit(money)) => -money,
             };
-            writeln!(f, "{:<32}{:>6}", indented_header, total)?;
+            writeln!(f, "{indented_header:<32}{total:>6}")?;
         }
         Ok(())
     }

@@ -68,7 +68,7 @@ fn balances_from_journal_lines(
 ) -> impl Future<Output = Result<Balances>> + '_ {
     lines.try_fold(
         HashMap::new(),
-        |mut acc, JournalLine(account, amount)| async move {
+        async |mut acc, JournalLine(account, amount)| {
             acc.entry(account.clone())
                 .and_modify(|total: &mut JournalAmount| {
                     total.add_assign(amount);
@@ -121,7 +121,7 @@ impl Ledger {
     ) -> BoxStream<'_, Result<JournalEntry>> {
         self.entries_filtered(account, party)
             .and_then(
-                |entry| async move { Ok(stream::iter(entry.to_journal_entries(None)?).map(Ok)) }, // TODO pass in until date
+                async |entry| Ok(stream::iter(entry.to_journal_entries(None)?).map(Ok)), // TODO pass in until date
             )
             .try_flatten()
             .boxed()

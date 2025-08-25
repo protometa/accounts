@@ -16,7 +16,7 @@ impl TryFrom<f64> for Money {
     type Error = Error;
 
     fn try_from(f: f64) -> Result<Self> {
-        let mut d = Decimal::from_f64(f).context(format!("Failed to convert {} to Money", f))?;
+        let mut d = Decimal::from_f64(f).context(format!("Failed to convert {f} to Money"))?;
         if d.scale() < 2 {
             d.rescale(2);
         }
@@ -28,7 +28,7 @@ impl TryFrom<u64> for Money {
     type Error = Error;
 
     fn try_from(f: u64) -> Result<Self> {
-        let mut d = Decimal::from_u64(f).context(format!("Failed to convert {} to Money", f))?;
+        let mut d = Decimal::from_u64(f).context(format!("Failed to convert {f} to Money"))?;
         if d.scale() < 2 {
             d.rescale(2);
         }

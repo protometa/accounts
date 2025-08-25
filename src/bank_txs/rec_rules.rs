@@ -389,18 +389,17 @@ impl GenEntry {
         if let Some(bank_account) = evaled.get("bank_account") {
             let relevant_lines = entry.lines()?.into_iter().filter(|l| l.0 == *bank_account);
 
-            if relevant_lines
+            if !relevant_lines
                 .clone()
-                .find(|l| l.1 == self.tx.amount.invert())
-                .is_none()
+                .any(|l| l.1 == self.tx.amount.invert())
             {
-                return Ok(None);
+                Ok(None)
             } else {
-                return Ok(Some(relevant_lines.count()));
+                Ok(Some(relevant_lines.count()))
             }
         } else {
             // TODO currently bank_account value is required, but should also match on fully qualified account in templates
-            return Ok(None);
+            Ok(None)
         }
     }
 }

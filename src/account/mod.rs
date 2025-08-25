@@ -2,7 +2,7 @@ mod raw;
 
 use self::Sign::*;
 use self::Type::*;
-use anyhow::{bail, Context, Error, Result};
+use anyhow::{Context, Error, Result, bail};
 use std::{
     convert::{TryFrom, TryInto},
     str::FromStr,
@@ -120,11 +120,11 @@ impl FromStr for Account {
 
     fn from_str(doc: &str) -> Result<Self, Self::Err> {
         let raw_account: raw::Account = serde_yaml::from_str(doc)
-            .with_context(|| format!("Failed to deserialize Account:\n{}", doc))?;
+            .with_context(|| format!("Failed to deserialize Account:\n{doc}"))?;
         let name = raw_account.name.clone();
         let account: Account = raw_account
             .try_into()
-            .with_context(|| format!("Failed to convert Account: {}", name))?;
+            .with_context(|| format!("Failed to convert Account: {name}"))?;
         Ok(account)
     }
 }

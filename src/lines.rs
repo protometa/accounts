@@ -14,7 +14,7 @@ fn dir_lines(dir: &str) -> impl Stream<Item = Result<String>> + use<> {
             let path = dir_entry.path();
             let filestem = path
                 .file_stem()
-                .ok_or_else(|| Error::new(ErrorKind::Other, "No file stem"))?
+                .ok_or_else(|| Error::other("No file stem"))?
                 .to_string_lossy();
             if path.is_dir() || filestem.starts_with('.') {
                 return Ok(None);
