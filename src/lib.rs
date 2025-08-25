@@ -30,10 +30,12 @@ type Balances = HashMap<JournalAccount, JournalAmount>;
 pub fn entries_from_lines(
     lines_stream: impl Stream<Item = Result<String, std::io::Error>> + Send + 'static,
     // filter by account
-    account: Option<String>, // TODO use Option<&str>?
+    account: Option<&str>,
     // filter by party
-    party: Option<String>,
+    party: Option<&str>,
 ) -> BoxStream<'static, Result<Entry>> {
+    let account = account.map(String::from);
+    let party = party.map(String::from);
     lines_stream
         // remove lines starting with #
         .try_filter(|s| future::ready(!s.to_owned().trim().starts_with("#")))
@@ -94,9 +96,9 @@ impl Ledger {
     pub fn entries_filtered(
         &self,
         // filter by account
-        account: Option<String>,
+        account: Option<&str>,
         // filter by party
-        party: Option<String>,
+        party: Option<&str>,
     ) -> BoxStream<Result<Entry>> {
         entries_from_lines(lines(self.path.clone()), account, party)
     }
@@ -113,9 +115,9 @@ impl Ledger {
     pub fn journal_filtered(
         &self,
         // filter by account
-        account: Option<String>,
+        account: Option<&str>,
         // filter by party
-        party: Option<String>,
+        party: Option<&str>,
     ) -> BoxStream<Result<JournalEntry>> {
         self.entries_filtered(account, party)
             .and_then(
@@ -132,8 +134,10 @@ impl Ledger {
 
     pub fn balances_filtered(
         &self,
-        account: Option<String>,
-        party: Option<String>,
+        // filter by account
+        account: Option<&str>,
+        // filter by party
+        party: Option<&str>,
     ) -> impl Future<Output = Result<Balances>> {
         let lines = self
             .journal_filtered(account, party)
@@ -146,8 +150,10 @@ impl Ledger {
 
     pub fn journal_lines_filtered(
         &self,
-        account: Option<String>,
-        party: Option<String>,
+        // filter by account
+        account: Option<&str>,
+        // filter by party
+        party: Option<&str>,
     ) -> BoxStream<Result<JournalLine>> {
         self.journal_filtered(account, party)
             .and_then(|entry| future::ready(Ok(stream::iter(entry.lines()).map(Ok))))
@@ -162,7 +168,7 @@ impl Ledger {
         until: Option<NaiveDate>,
         account: JournalAccount,
     ) -> BoxStream<Result<JournalLine>> {
-        self.entries_filtered(Some(account.clone()), None)
+        self.entries_filtered(Some(account.clone()).as_deref(), None)
             .and_then(move |entry| {
                 future::ready(Ok(stream::iter(
                     entry
@@ -265,7 +271,7 @@ mod entry_tests {
                 .map(std::io::Result::Ok),
         ));
 
-        let entries = entries_from_lines(lines, Some("Bank Checking".to_string()), None)
+        let entries = entries_from_lines(lines, Some("Bank Checking"), None)
             .try_collect::<Vec<Entry>>()
             .await?;
 
@@ -289,7 +295,7 @@ mod entry_tests {
                 .map(std::io::Result::Ok),
         ));
 
-        let entries = entries_from_lines(lines, None, Some("ACME Electrical".to_string()))
+        let entries = entries_from_lines(lines, None, Some("ACME Electrical"))
             .try_collect::<Vec<Entry>>()
             .await?;
 
@@ -313,13 +319,9 @@ mod entry_tests {
                 .map(std::io::Result::Ok),
         ));
 
-        let entries = entries_from_lines(
-            lines,
-            Some("Bank Checking".to_string()),
-            Some("ACME Electrical".to_string()),
-        )
-        .try_collect::<Vec<Entry>>()
-        .await?;
+        let entries = entries_from_lines(lines, Some("Bank Checking"), Some("ACME Electrical"))
+            .try_collect::<Vec<Entry>>()
+            .await?;
 
         dbg!(&entries);
         assert_eq!(

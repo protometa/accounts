@@ -133,8 +133,8 @@ async fn main() -> Result<()> {
         if let Some(journal) = matches.subcommand_matches("journal") {
             // TODO walk dir sorted and add check to assert date order and process this iteratively instead of collecting
             // TODO solve the problem of emitting recurring entries in order
-            let party = journal.value_of("party").map(String::from);
-            let account = journal.value_of("account").map(String::from);
+            let party = journal.value_of("party");
+            let account = journal.value_of("account");
 
             let mut journal_entries: Vec<JournalEntry> = ledger
                 .journal_filtered(account, party)
@@ -145,8 +145,8 @@ async fn main() -> Result<()> {
                 print!("{entry}");
             });
         } else if let Some(balances) = matches.subcommand_matches("balances") {
-            let party = balances.value_of("party").map(String::from);
-            let account = balances.value_of("account").map(String::from);
+            let party = balances.value_of("party");
+            let account = balances.value_of("account");
 
             let balances = ledger.balances_filtered(account, party).await?;
             let total = balances
