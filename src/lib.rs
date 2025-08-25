@@ -13,7 +13,7 @@ use entry::Entry;
 use entry::journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine};
 use futures::future::{self, Future};
 use futures::stream::{self, BoxStream, TryStreamExt};
-use futures::{StreamExt, TryStream};
+use futures::{Stream, StreamExt, TryStream};
 use lines::lines;
 use lines_ext::LinesExt;
 use report::ReportNode;
@@ -21,7 +21,6 @@ use std::borrow::ToOwned;
 use std::collections::HashMap;
 use std::ops::AddAssign;
 
-// TODO explore using pinned stream instead of attaching everything to this struct
 pub struct Ledger {
     path: Option<String>,
 }
@@ -29,13 +28,12 @@ pub struct Ledger {
 type Balances = HashMap<JournalAccount, JournalAmount>;
 
 pub fn entries_from_lines(
-    lines_stream: BoxStream<'_, Result<String, std::io::Error>>,
+    lines_stream: impl Stream<Item = Result<String, std::io::Error>> + Send + 'static,
     // filter by account
     account: Option<String>, // TODO use Option<&str>?
     // filter by party
     party: Option<String>,
-) -> BoxStream<'_, Result<Entry>> {
-    // let l = lines(Some("".to_string()));
+) -> BoxStream<'static, Result<Entry>> {
     lines_stream
         // remove lines starting with #
         .try_filter(|s| future::ready(!s.to_owned().trim().starts_with("#")))
@@ -64,8 +62,8 @@ pub fn entries_from_lines(
 }
 
 fn balances_from_journal_lines(
-    lines: BoxStream<'_, Result<JournalLine>>,
-) -> impl Future<Output = Result<Balances>> + '_ {
+    lines: BoxStream<Result<JournalLine>>,
+) -> impl Future<Output = Result<Balances>> {
     lines.try_fold(
         HashMap::new(),
         async |mut acc, JournalLine(account, amount)| {
@@ -88,7 +86,7 @@ impl Ledger {
     }
 
     /// Parse own stream of lines into `Entry`s
-    pub fn entries(&self) -> BoxStream<'_, Result<Entry>> {
+    pub fn entries(&self) -> BoxStream<Result<Entry>> {
         self.entries_filtered(None, None)
     }
 
@@ -99,8 +97,8 @@ impl Ledger {
         account: Option<String>,
         // filter by party
         party: Option<String>,
-    ) -> BoxStream<'_, Result<Entry>> {
-        entries_from_lines(lines(self.path.clone()).boxed(), account, party)
+    ) -> BoxStream<Result<Entry>> {
+        entries_from_lines(lines(self.path.clone()), account, party)
     }
 
     /// Convert own stream of `Entry`s into `JournalEntry`s
@@ -118,7 +116,7 @@ impl Ledger {
         account: Option<String>,
         // filter by party
         party: Option<String>,
-    ) -> BoxStream<'_, Result<JournalEntry>> {
+    ) -> BoxStream<Result<JournalEntry>> {
         self.entries_filtered(account, party)
             .and_then(
                 async |entry| Ok(stream::iter(entry.to_journal_entries(None)?).map(Ok)), // TODO pass in until date
@@ -128,7 +126,7 @@ impl Ledger {
     }
 
     /// Get balances for each account appearing in own stream of `JournalEntry`s
-    pub fn balances(&self) -> impl Future<Output = Result<Balances>> + '_ {
+    pub fn balances(&self) -> impl Future<Output = Result<Balances>> {
         self.balances_filtered(None, None)
     }
 
@@ -136,7 +134,7 @@ impl Ledger {
         &self,
         account: Option<String>,
         party: Option<String>,
-    ) -> impl Future<Output = Result<Balances>> + '_ {
+    ) -> impl Future<Output = Result<Balances>> {
         let lines = self
             .journal_filtered(account, party)
             .and_then(|entry| async move { Ok(stream::iter(entry.lines()).map(Ok)) })
@@ -150,7 +148,7 @@ impl Ledger {
         &self,
         account: Option<String>,
         party: Option<String>,
-    ) -> BoxStream<'_, Result<JournalLine>> {
+    ) -> BoxStream<Result<JournalLine>> {
         self.journal_filtered(account, party)
             .and_then(|entry| future::ready(Ok(stream::iter(entry.lines()).map(Ok))))
             .try_flatten()
@@ -163,7 +161,7 @@ impl Ledger {
         &self,
         until: Option<NaiveDate>,
         account: JournalAccount,
-    ) -> BoxStream<'_, Result<JournalLine>> {
+    ) -> BoxStream<Result<JournalLine>> {
         self.entries_filtered(Some(account.clone()), None)
             .and_then(move |entry| {
                 future::ready(Ok(stream::iter(

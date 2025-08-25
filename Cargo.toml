@@ -17,6 +17,7 @@ num-traits = "0.2.14"
 rrule = "0.7.0"
 chrono-tz = "0.6.1"
 clap = "3.0.0-beta.2"
+# lines-ext = { path = "../lines-ext" }
 lines-ext = { git = "https://github.com/protometa/lines-ext" }
 indoc = "2.0.6"
 rule = "0.1.6"

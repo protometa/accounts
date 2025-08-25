@@ -746,7 +746,7 @@ checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
 [[package]]
 name = "lines-ext"
 version = "2.0.0"
-source = "git+https://github.com/protometa/lines-ext#1e3b87163a66ddf59930bb8e00191d629b6457b3"
+source = "git+https://github.com/protometa/lines-ext#1be4a5afcf2101c807f9122d5ad8dfcb6c39785b"
 dependencies = [
  "futures",
  "pin-project-lite",
