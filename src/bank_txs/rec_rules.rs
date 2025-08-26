@@ -205,7 +205,7 @@ impl GenEntry {
             .context("template not an object")?;
 
         // set id if not set
-        if templated.get("id").is_none() {
+        if !templated.contains_key("id") {
             templated.insert(
                 "id".to_string(),
                 Value::String(
@@ -222,7 +222,7 @@ impl GenEntry {
         }
 
         // set date if not set from values or tx
-        if templated.get("date").is_none() {
+        if !templated.contains_key("date") {
             templated.insert(
                 "date".to_string(),
                 Value::String(
@@ -235,7 +235,7 @@ impl GenEntry {
         }
 
         // set memo if not set from values or tx
-        if templated.get("memo").is_none() {
+        if !templated.contains_key("memo") {
             templated.insert(
                 "memo".to_string(),
                 Value::String(evaled.get("memo").cloned().unwrap_or(self.tx.memo.clone())),
@@ -243,22 +243,22 @@ impl GenEntry {
         }
 
         // set type if not set
-        if templated.get("type").is_none() {
-            if templated.get("party").is_some() {
-                if templated.get("items").is_none() {
-                    // party is given but not items
-                    // assume payment type
+        if !templated.contains_key("type") {
+            if templated.contains_key("party") {
+                if evaled.contains_key("offset_account") || templated.contains_key("items") {
+                    // party with offset_account or items is given
+                    // assume invoice type
                     let default_type = match self.tx.amount {
-                        Credit(_) => "Payment Received".to_string(),
-                        Debit(_) => "Payment Sent".to_string(),
+                        Debit(_) => "Purchase Invoice".to_string(),
+                        Credit(_) => "Sales Invoice".to_string(),
                     };
                     templated.insert("type".to_string(), Value::String(default_type));
                 } else {
-                    // party and items are given
-                    // assume invoice type
+                    // party is given but not offset_account or items
+                    // assume payment type
                     let default_type = match self.tx.amount {
-                        Credit(_) => "Purchase Invoice".to_string(),
-                        Debit(_) => "Sales Invoice".to_string(),
+                        Debit(_) => "Payment Sent".to_string(),
+                        Credit(_) => "Payment Received".to_string(),
                     };
                     templated.insert("type".to_string(), Value::String(default_type));
                 }
@@ -283,7 +283,7 @@ impl GenEntry {
                 );
 
                 // account from template or special bank_account value
-                if templated.get("account").is_none() {
+                if !templated.contains_key("account") {
                     if let Some(bank_account) = evaled.get("bank_account") {
                         templated
                             .insert("account".to_string(), Value::String(bank_account.clone()));
@@ -291,11 +291,33 @@ impl GenEntry {
                 }
             }
             Some("Purchase Invoice") | Some("Sales Invoice") => {
-                // TODO add invoice payment details if possible
+                // set invoice account from special offset_account value if not set in template
+                if !templated.contains_key("account")
+                    && let Some(offset_account) = evaled.get("offset_account")
+                {
+                    templated.insert("account".to_string(), json!(offset_account));
+                }
+
+                // set amount from tx
+                let samount = self.tx.amount.abs_amount().to_string();
+                templated.insert("amount".to_string(), json!(samount));
+
+                // set invoice payment account from special bank_account value if not set in template
+                if !templated.contains_key("payment")
+                    && let Some(bank_account) = evaled.get("bank_account")
+                {
+                    templated.insert(
+                        "payment".to_string(),
+                        json!({
+                            "account": bank_account,
+                            "amount": samount
+                        }),
+                    );
+                }
             }
             Some("Journal Entry") => {
                 // debits and credits from template or special bank_account and offset_account values
-                if templated.get("debits").is_none() && templated.get("credits").is_none() {
+                if !templated.contains_key("debits") && !templated.contains_key("credits") {
                     if let (Some(bank_account), Some(offset_account)) =
                         (evaled.get("bank_account"), evaled.get("offset_account"))
                     {

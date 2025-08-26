@@ -44,20 +44,20 @@ pub fn entries_from_lines(
         .try_filter(|s| future::ready(!s.trim().is_empty()))
         .map_err(Error::new) // map to anyhow::Error from here on
         .and_then(|doc| future::ready(doc.parse()))
-        // filter by party
-        .try_filter(move |entry: &Entry| {
-            future::ready(
-                party
-                    .clone()
-                    .is_none_or(|pf| entry.party().is_some_and(|pe| pe == pf)),
-            )
-        })
         // filter by account
         .try_filter(move |entry: &Entry| {
             future::ready(
                 account
                     .clone()
                     .is_none_or(|af| entry.amount_of_account(&af).is_some()),
+            )
+        })
+        // filter by party
+        .try_filter(move |entry: &Entry| {
+            future::ready(
+                party
+                    .clone()
+                    .is_none_or(|pf| entry.party().is_some_and(|pe| pe == pf)),
             )
         })
         .boxed()
@@ -198,13 +198,13 @@ impl Ledger {
             })
     }
 
-    pub fn payable(&self) -> impl Future<Output = Result<Balances>> + '_ {
+    pub fn payable(&self) -> impl Future<Output = Result<Balances>> {
         let account = "Accounts Payable".to_string();
         let party_lines = self.journal_lines_with_party(None, account); // TODO pass in until
         balances_from_journal_lines(party_lines)
     }
 
-    pub fn receivable(&self) -> impl Future<Output = Result<Balances>> + '_ {
+    pub fn receivable(&self) -> impl Future<Output = Result<Balances>> {
         let account = "Accounts Receivable".to_string();
         let party_lines = self.journal_lines_with_party(None, account); // TODO pass in until
         balances_from_journal_lines(party_lines)
