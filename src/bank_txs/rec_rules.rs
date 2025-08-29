@@ -199,27 +199,36 @@ impl GenEntry {
     }
 
     pub fn generate(&self) -> Result<Entry> {
+        let raw_entry = self.generate_raw_entry()?;
+        Ok(raw_entry
+            .clone()
+            .try_into()
+            .with_context(|| format!("Failed to generate entry from raw entry: {raw_entry:?}"))?)
+    }
+
+    pub fn generate_raw_entry(&self) -> Result<raw::Entry> {
         let (evaled, mut templated) = self.evaluate()?;
         let templated = templated
             .as_object_mut()
             .context("template not an object")?;
 
-        // set id if not set
-        if !templated.contains_key("id") {
-            templated.insert(
-                "id".to_string(),
-                Value::String(
-                    evaled
-                        .get("id")
-                        .cloned()
-                        // TODO generate better id from tx
-                        .unwrap_or_else(|| {
-                            let famount: f64 = self.tx.amount.try_into().unwrap_or_default();
-                            format!("{}-{}", &self.tx.date.to_string(), &famount.to_string())
-                        }),
-                ),
-            );
-        }
+        // TODO make better IDs
+        // // set id if not set
+        // if !templated.contains_key("id") {
+        //     templated.insert(
+        //         "id".to_string(),
+        //         Value::String(
+        //             evaled
+        //                 .get("id")
+        //                 .cloned()
+        //                 // TODO generate better id from tx
+        //                 .unwrap_or_else(|| {
+        //                     let famount: f64 = self.tx.amount.try_into().unwrap_or_default();
+        //                     format!("{}-{}", &self.tx.date.to_string(), &famount.to_string())
+        //                 }),
+        //         ),
+        //     );
+        // }
 
         // set date if not set from values or tx
         if !templated.contains_key("date") {
@@ -243,32 +252,25 @@ impl GenEntry {
         }
 
         // set type if not set
-        if !templated.contains_key("type") {
-            if templated.contains_key("party") {
-                if evaled.contains_key("offset_account") || templated.contains_key("items") {
-                    // party with offset_account or items is given
-                    // assume invoice type
-                    let default_type = match self.tx.amount {
-                        Debit(_) => "Purchase Invoice".to_string(),
-                        Credit(_) => "Sales Invoice".to_string(),
-                    };
-                    templated.insert("type".to_string(), Value::String(default_type));
-                } else {
-                    // party is given but not offset_account or items
-                    // assume payment type
-                    let default_type = match self.tx.amount {
-                        Debit(_) => "Payment Sent".to_string(),
-                        Credit(_) => "Payment Received".to_string(),
-                    };
-                    templated.insert("type".to_string(), Value::String(default_type));
-                }
+        // and if party is set assume not journal entry
+        // else assume journal entry by default
+        if !templated.contains_key("type") && templated.contains_key("party") {
+            if evaled.contains_key("offset_account") || templated.contains_key("items") {
+                // party with offset_account or items is given
+                // assume invoice type
+                let default_type = match self.tx.amount {
+                    Debit(_) => "Purchase Invoice".to_string(),
+                    Credit(_) => "Sales Invoice".to_string(),
+                };
+                templated.insert("type".to_string(), Value::String(default_type));
             } else {
-                // party is not given
-                // assume journal entry
-                templated.insert(
-                    "type".to_string(),
-                    Value::String("Journal Entry".to_string()),
-                );
+                // party is given but not offset_account or items
+                // assume payment type
+                let default_type = match self.tx.amount {
+                    Debit(_) => "Payment Sent".to_string(),
+                    Credit(_) => "Payment Received".to_string(),
+                };
+                templated.insert("type".to_string(), Value::String(default_type));
             }
         }
 
@@ -315,7 +317,7 @@ impl GenEntry {
                     );
                 }
             }
-            Some("Journal Entry") => {
+            Some("Journal Entry") | None => {
                 // debits and credits from template or special bank_account and offset_account values
                 if !templated.contains_key("debits") && !templated.contains_key("credits") {
                     if let (Some(bank_account), Some(offset_account)) =
@@ -341,20 +343,10 @@ impl GenEntry {
                     "Invlid type {s:?} found for generated entry from template:\n{templated:?}\nWith values:\n{evaled:?}"
                 );
             }
-            None => {
-                bail!(
-                    "Cound not determine type for generated entry from template:\n{templated:?}\nWith values:\n{evaled:?}"
-                );
-            }
         }
 
-        let raw_entry: raw::Entry = serde_json::from_value(Value::Object(templated.clone()))
-            .with_context(|| format!("Failed to generate raw entry from template:\n{templated:?}\nWith values:\n{evaled:?}"))?;
-
-        Ok(raw_entry
-            .clone()
-            .try_into()
-            .with_context(|| format!("Failed to generate entry from raw entry:\n{raw_entry:?}"))?)
+        serde_json::from_value(Value::Object(templated.clone()))
+            .with_context(|| format!("Failed to generate raw entry from template:\n{templated:?}\nWith values:\n{evaled:?}"))
     }
 
     /// evaluates value expressions and apply to template

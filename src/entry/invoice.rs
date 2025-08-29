@@ -1,6 +1,9 @@
-use super::{journal::JournalAccount, raw};
+use super::{
+    journal::JournalAccount,
+    raw::{self, Payment},
+};
 use crate::money::Money;
-use anyhow::{bail, Context, Error, Result};
+use anyhow::{Context, Error, Result, bail};
 use chrono::prelude::*;
 use chrono_tz::UTC;
 use rrule::{Frequency, RRuleProperties};
@@ -9,12 +12,12 @@ use std::convert::{TryFrom, TryInto};
 
 #[derive(Debug, Clone)]
 pub struct Invoice {
-    party: String,
-    account: JournalAccount,
-    amount: Option<Money>,
-    items: Vec<InvoiceItem>,
-    extras: Option<Vec<InvoiceExtra>>,
-    payment: Option<InvoicePayment>,
+    pub party: String,
+    pub account: JournalAccount,
+    pub amount: Option<Money>,
+    pub items: Vec<InvoiceItem>,
+    pub extras: Option<Vec<InvoiceExtra>>,
+    pub payment: Option<Payment>,
 }
 
 pub fn default_monthly_rrule(date: NaiveDate) -> RRuleProperties {
@@ -97,8 +100,8 @@ impl TryFrom<raw::Entry> for Invoice {
                 })
                 .transpose()?,
             payment: payment
-                .map(|payment| -> Result<InvoicePayment> {
-                    Ok(InvoicePayment {
+                .map(|payment| -> Result<Payment> {
+                    Ok(Payment {
                         account: payment.account,
                         amount: payment.amount,
                     })
@@ -207,10 +210,4 @@ enum InvoiceExtraAmount {
     Total(Money),
     Rate(f64),
     // CumulativeRate(f64),
-}
-
-#[derive(Debug, Clone)]
-pub struct InvoicePayment {
-    pub account: String,
-    pub amount: Money,
 }

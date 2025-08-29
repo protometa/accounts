@@ -7,6 +7,7 @@ use crate::money::Money;
 use JournalAmount::{Credit, Debit};
 use anyhow::{Context, Error, Result};
 use chrono::prelude::*;
+use invoice::InvoiceItemAmount::{ByRate, Total};
 use invoice::{Invoice, default_monthly_rrule};
 use journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine, JournalLines};
 use payment::*;
@@ -197,6 +198,7 @@ impl Entry {
                     self.memo.as_deref(),
                     &lines,
                     Some("Accounts Payable".to_string()),
+                    self.party().as_deref(),
                 )
             }
             Body::PaymentSent(payment) => JournalEntry::new(
@@ -208,6 +210,7 @@ impl Entry {
                     JournalLine("Accounts Payable".to_string(), Debit(payment.amount)),
                 ],
                 None,
+                self.party().as_deref(),
             ),
             Body::SaleInvoice(invoice) => {
                 let bill_lines = invoice
@@ -226,6 +229,7 @@ impl Entry {
                     self.memo.as_deref(),
                     &lines,
                     Some("Accounts Receivable".to_string()),
+                    self.party().as_deref(),
                 )
             }
             Body::PaymentReceived(payment) => JournalEntry::new(
@@ -237,9 +241,10 @@ impl Entry {
                     JournalLine("Accounts Receivable".to_string(), Credit(payment.amount)),
                 ],
                 None,
+                self.party().as_deref(),
             ),
             Body::Journal(lines) => {
-                JournalEntry::new(&self.id, &date, self.memo.as_deref(), &lines, None)
+                JournalEntry::new(&self.id, &date, self.memo.as_deref(), &lines, None, None)
             }
         }
     }
@@ -252,7 +257,10 @@ impl TryFrom<raw::Entry> for Entry {
         let date: NaiveDate = raw_entry.date.parse()?;
         let end: Option<NaiveDate> = raw_entry.end.clone().map(|s| s.parse()).transpose()?;
         Ok(Entry {
-            id: raw_entry.id.clone().context("Id missing!")?,
+            // TODO make better IDs
+            // id: raw_entry.id.clone().context("Id missing!")?,
+            id: raw_entry.id.clone().unwrap_or_default(),
+
             // `date` is single date unless `repeat` is specified then becomes rrule
             // rrule is parsed from optional `repeat` and `end` fields
             // treating string 'monthly' as generic monthly rrule
@@ -327,6 +335,14 @@ impl From<Entry> for raw::Entry {
         let date = val.date().to_string();
         let memo = val.memo();
 
+        let r#type = match val.body {
+            Body::Journal(_) => None,
+            Body::PaymentSent(_) => Some("Payment Sent".to_string()),
+            Body::PaymentReceived(_) => Some("Payment Received".to_string()),
+            Body::PurchaseInvoice(_) => Some("Purchase Invoice".to_string()),
+            Body::SaleInvoice(_) => Some("Sale Invoice".to_string()),
+        };
+
         let raw_body = match val.body {
             Body::Journal(lines) => {
                 let debits: HashMap<String, Money> = lines
@@ -346,23 +362,50 @@ impl From<Entry> for raw::Entry {
                     ..Default::default()
                 }
             }
-            Body::PaymentSent(payment) => raw::Entry {
-                r#type: Some("Payment Sent".to_string()),
+            Body::PaymentSent(payment) | Body::PaymentReceived(payment) => raw::Entry {
+                r#type,
                 party: Some(payment.party),
                 account: Some(payment.account),
                 amount: Some(payment.amount),
                 ..Default::default()
             },
-            Body::PaymentReceived(payment) => raw::Entry {
-                r#type: Some("Payment Received".to_string()),
-                party: Some(payment.party),
-                account: Some(payment.account),
-                amount: Some(payment.amount),
-                ..Default::default()
-            },
-            // TODO handle all the other types
-            _ => {
-                todo!()
+            Body::PurchaseInvoice(invoice) | Body::SaleInvoice(invoice) => {
+                let items = if invoice.items.is_empty() {
+                    None
+                } else {
+                    Some(raw::Items::Expanded(
+                        invoice
+                            .items
+                            .into_iter()
+                            .map(|item| {
+                                let (amount, quantity, rate) = match item.amount {
+                                    invoice::InvoiceItemAmount::Total(total) => {
+                                        (Some(total), None, None)
+                                    }
+                                    ByRate { rate, quantity } => (None, Some(quantity), Some(rate)),
+                                };
+                                raw::Item {
+                                    description: item.description,
+                                    code: item.code,
+                                    account: Some(item.account),
+                                    amount,
+                                    quantity,
+                                    rate,
+                                }
+                            })
+                            .collect(),
+                    ))
+                };
+                raw::Entry {
+                    r#type,
+                    party: Some(invoice.party),
+                    account: Some(invoice.account),
+                    amount: invoice.amount,
+                    items,
+                    // TODO include extras
+                    payment: invoice.payment,
+                    ..Default::default()
+                }
             }
         };
 
@@ -583,6 +626,30 @@ mod entry_tests {
             JournalAmount::debit(0.05)?
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn parse_unknown_fields_error() -> Result<()> {
+        // if not items, use given total amount
+        let entry: Result<Entry> = indoc! {"
+            ---
+            date: 2020-01-01
+            type: Purchase Invoice
+            party: ACME Construction
+            account: Home Improvements
+            memo: \"Invoice #1234\"
+            amount: 808
+            payments: # typo, this field is not plural
+              account: Cash
+              ammount: 808
+        "}
+        .parse();
+
+        dbg!(&entry);
+        assert!(
+            matches!(entry, Err(e) if dbg!(e.source().unwrap().to_string()).contains("unknown field"))
+        );
         Ok(())
     }
 

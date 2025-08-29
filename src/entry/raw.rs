@@ -17,12 +17,13 @@ pub struct ExpandedLine {
 }
 
 /// Raw struct deserilized from yaml
-#[skip_serializing_none]
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
+#[skip_serializing_none]
+#[serde(deny_unknown_fields)]
 pub struct Entry {
     pub id: Option<String>, // if not specified will use filename
-    pub r#type: Option<String>,
     pub date: String,
+    pub r#type: Option<String>,
     pub memo: Option<String>,
     pub debits: Option<Lines>,
     pub credits: Option<Lines>,
@@ -66,7 +67,7 @@ pub struct Item {
     pub account: Option<String>, // include if specific override to default above
     pub amount: Option<Money>,   // specify either ammount here or quantity and rate below
     pub quantity: Option<f64>,
-    pub rate: Option<f64>,
+    pub rate: Option<Money>,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

@@ -2,13 +2,15 @@
 
 use self::JournalAmount::*;
 use crate::money::Money;
-use anyhow::{bail, Error, Result};
+use anyhow::{Error, Result, bail};
 use chrono::NaiveDate;
 use num_traits::Zero;
 use std::cmp::Ordering;
 use std::convert::TryInto;
 use std::fmt;
 use std::ops::{AddAssign, Deref};
+
+use super::Entry;
 
 pub type JournalAccount = String;
 
@@ -136,6 +138,8 @@ pub struct JournalEntry {
     date: NaiveDate,
     memo: Option<String>,
     lines: JournalLines,
+    // possible party from Entry
+    party: Option<String>,
 }
 
 /// a valid set of journal entry lines
@@ -212,12 +216,14 @@ impl JournalEntry {
         memo: Option<&str>,
         lines: &[JournalLine],
         balance_account: Option<JournalAccount>,
+        party: Option<&str>,
     ) -> Result<Self> {
         Ok(JournalEntry {
             r#ref: r#ref.to_owned(),
             date: date.to_owned(),
             memo: memo.map(|s| s.to_owned()),
             lines: JournalLines::new(lines.to_owned(), balance_account)?,
+            party: party.map(|s| s.to_owned()),
         })
     }
 
@@ -231,6 +237,30 @@ impl JournalEntry {
 
     pub fn lines(&self) -> JournalLines {
         self.lines.clone()
+    }
+
+    pub fn to_row_strings(&self, with_party: bool) -> Result<Vec<String>> {
+        let rows: Vec<String> = self
+            .lines()
+            .into_iter()
+            .map(|JournalLine(account, amount)| {
+                let date = self.date();
+                let acc_pad = 32;
+                let party_pad = 32;
+                let account = account.to_string();
+                let amt_string = amount.to_row_string(12);
+                let memo = self.memo.clone().unwrap_or_default();
+                if with_party {
+                    let party = self.party.clone().unwrap_or_default();
+                    format!(
+                        "{date} | {account:acc_pad$} | {party:party_pad$} | {amt_string} | {memo}"
+                    )
+                } else {
+                    format!("{date} | {account:acc_pad$} | {amt_string} | {memo}")
+                }
+            })
+            .collect();
+        Ok(rows)
     }
 }
 

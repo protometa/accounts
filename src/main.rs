@@ -1,5 +1,8 @@
 // use accounts;
-use accounts::{chart_of_accounts::ChartOfAccounts, *};
+use accounts::{
+    bank_txs::rec_rules::GenEntry, chart_of_accounts::ChartOfAccounts, entry::journal::JournalLine,
+    *,
+};
 use anyhow::Result;
 use bank_txs::BankTxs;
 use clap::{Arg, Command};
@@ -45,6 +48,12 @@ async fn main() -> Result<()> {
                         .help("Party filter")
                         .value_name("PARTY")
                         .takes_value(true),
+                )
+                .arg(
+                    Arg::new("with-party")
+                        .short('w')
+                        .long("with-party")
+                        .help("Show lines with party field"),
                 ),
         )
         .subcommand(
@@ -133,17 +142,20 @@ async fn main() -> Result<()> {
         if let Some(journal) = matches.subcommand_matches("journal") {
             // TODO walk dir sorted and add check to assert date order and process this iteratively instead of collecting
             // TODO solve the problem of emitting recurring entries in order
-            let party = journal.value_of("party");
             let account = journal.value_of("account");
+            let party = journal.value_of("party");
+            let with_party = journal.is_present("with-party");
 
-            let mut journal_entries: Vec<JournalEntry> = ledger
+            let mut entries: Vec<JournalEntry> = ledger
                 .journal_filtered(account, party)
                 .try_collect()
                 .await?;
-            journal_entries.sort_by_key(|x| x.date());
-            journal_entries.into_iter().for_each(|entry| {
-                print!("{entry}");
-            });
+            entries.sort_by_key(|x| x.date());
+            entries.into_iter().try_for_each(|entry| {
+                let rows = entry.to_row_strings(with_party)?.join("\n");
+                println!("{rows}");
+                anyhow::Ok(())
+            })?;
         } else if let Some(balances) = matches.subcommand_matches("balances") {
             let party = balances.value_of("party");
             let account = balances.value_of("account");
@@ -197,16 +209,11 @@ async fn main() -> Result<()> {
             let mut txs = BankTxs::from_files(txs_file, rules_file).await?;
 
             ledger
-                .entries()
-                // TODO use filters on entry method
-                .try_filter(|entry| {
-                    let has_account = entry.amount_of_account(account).is_some();
-                    future::ready(has_account)
-                })
+                .entries_filtered(Some(account), None)
                 .try_for_each(|entry: Entry| {
                     let matched = txs.match_and_rm(entry.clone());
                     if !matched.is_empty() {
-                        println!("Matched:\n{matched:?}\nwith:\n{entry:?}\n---");
+                        // println!("Matched:\n{matched:?}\nwith:\n{entry:?}\n---");
                     } else {
                         eprintln!("ERROR: No matching tx for:\n{entry:?}\n---");
                     };
@@ -215,16 +222,48 @@ async fn main() -> Result<()> {
                 })
                 .await?;
 
+            // TODO always reverse? or have importer handle that?
             txs.txs.iter().rev().for_each(|tx| {
-                let entry = (|| {
-                    let raw: raw::Entry = txs.rules.apply(tx)?.generate()?.into();
-                    let entry = serde_yaml::to_string(&raw)?;
-                    anyhow::Ok(entry)
-                })();
+                let raw_entry = txs
+                    .rules
+                    .apply(tx)
+                    .and_then(|g| g.generate_raw_entry())
+                    // map error to string for cloning
+                    .map_err(|e| e.to_string());
 
-                match entry {
-                    Ok(entry) => println!("# Entry generated from: {tx:?}:\n{entry}---"),
-                    Err(err) => eprintln!("ERROR generating:\n{tx:?}:\n{err}\n---"),
+                // possibly invalid/partial entry string
+                let entry_string = raw_entry
+                    .clone()
+                    .map_err(anyhow::Error::msg)
+                    .and_then(|re| serde_yaml::to_string(&re).map_err(anyhow::Error::new));
+
+                // convert to full Entry in order to validate
+                let entry: Result<Entry> = raw_entry
+                    .map_err(anyhow::Error::msg)
+                    .and_then(|re| re.try_into());
+
+                let tx_row = tx.to_row_string();
+
+                match (entry, entry_string) {
+                    (Ok(_), Ok(mut entry_string)) => {
+                        // insert comment after first `---` line from entry
+                        entry_string.insert_str(4, &format!("# Entry generated from: {tx_row}\n"));
+                        print!("{entry_string}")
+                    }
+                    (Err(entry_err), Ok(mut entry_string)) => {
+                        // insert comment after first `---` line from entry
+                        entry_string.insert_str(
+                            4,
+                            &format!("# ERROR generating entry for: {tx_row}\n# {entry_err}\n"),
+                        );
+                        println!("{entry_string}# ...")
+                    }
+                    (Err(err), Err(_)) => {
+                        println!("# ERROR generating entry for: {tx_row}\n{err}")
+                    }
+                    (Ok(_), Err(err)) => {
+                        println!("# ERROR generating entry for: {tx_row}\n{err}")
+                    }
                 }
             })
         }

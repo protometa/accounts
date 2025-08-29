@@ -30,6 +30,19 @@ pub struct BankTx {
     memo: String,
 }
 
+impl BankTx {
+    pub fn to_row_string(&self) -> String {
+        let BankTx {
+            date,
+            account,
+            amount,
+            memo,
+        } = self.clone();
+        let amount = amount.to_row_string(0);
+        format!("{date} | {account} | {amount} | {memo}")
+    }
+}
+
 /// Implement Serialize into various fields for matching against rules
 impl Serialize for BankTx {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -172,7 +185,7 @@ impl BankTxs {
                 })
             && removed.len() < relevant
         {
-            removed.push(self.txs.swap_remove(position));
+            removed.push(self.txs.remove(position));
         }
         removed
     }

@@ -16,6 +16,7 @@ use futures::stream::{self, BoxStream, TryStreamExt};
 use futures::{Stream, StreamExt, TryStream};
 use lines::lines;
 use lines_ext::LinesExt;
+use money::Money;
 use report::ReportNode;
 use std::borrow::ToOwned;
 use std::collections::HashMap;
@@ -198,16 +199,26 @@ impl Ledger {
             })
     }
 
-    pub fn payable(&self) -> impl Future<Output = Result<Balances>> {
+    pub async fn payable(&self) -> Result<Balances> {
         let account = "Accounts Payable".to_string();
         let party_lines = self.journal_lines_with_party(None, account); // TODO pass in until
-        balances_from_journal_lines(party_lines)
+        let balances = balances_from_journal_lines(party_lines).await?;
+        // filter out zero balances
+        Ok(balances
+            .into_iter()
+            .filter(|(_, amt)| amt.abs_amount() != Money::default())
+            .collect())
     }
 
-    pub fn receivable(&self) -> impl Future<Output = Result<Balances>> {
+    pub async fn receivable(&self) -> Result<Balances> {
         let account = "Accounts Receivable".to_string();
         let party_lines = self.journal_lines_with_party(None, account); // TODO pass in until
-        balances_from_journal_lines(party_lines)
+        let balances = balances_from_journal_lines(party_lines).await?;
+        // filter out zero balances
+        Ok(balances
+            .into_iter()
+            .filter(|(_, amt)| amt.abs_amount() != Money::default())
+            .collect())
     }
 }
 
