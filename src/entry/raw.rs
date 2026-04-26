@@ -16,14 +16,29 @@ pub struct ExpandedLine {
     pub amount: Money,
 }
 
+#[derive(Debug, Default, Deserialize, PartialEq, Clone, Serialize)]
+pub enum EntryType {
+    #[serde(rename = "Journal Entry")]
+    #[default]
+    JournalEntry,
+    #[serde(rename = "Purchase Invoice")]
+    PurchaseInvoice,
+    #[serde(rename = "Sales Invoice")]
+    SalesInvoice,
+    #[serde(rename = "Payment Sent")]
+    PaymentSent,
+    #[serde(rename = "Payment Received")]
+    PaymentReceived,
+}
+
 /// Raw struct deserilized from yaml
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
 #[skip_serializing_none]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Entry {
     pub id: Option<String>, // if not specified will use filename
     pub date: String,
-    pub r#type: Option<String>,
+    pub r#type: Option<EntryType>,
     pub memo: Option<String>,
     pub debits: Option<Lines>,
     pub credits: Option<Lines>,

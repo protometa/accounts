@@ -11,7 +11,7 @@ use invoice::InvoiceItemAmount::{ByRate, Total};
 use invoice::{Invoice, default_monthly_rrule};
 use journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine, JournalLines};
 use payment::*;
-use raw::{ExpandedLine, Lines};
+use raw::{EntryType, ExpandedLine, Lines};
 use rrule::RRule;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
@@ -279,12 +279,18 @@ impl TryFrom<raw::Entry> for Entry {
                 },
             )?,
             memo: raw_entry.memo.to_owned(),
-            body: match raw_entry.r#type.as_deref() {
-                Some("Payment Sent") => Ok(Body::PaymentSent(raw_entry.try_into()?)),
-                Some("Payment Received") => Ok(Body::PaymentReceived(raw_entry.try_into()?)),
-                Some("Purchase Invoice") => Ok(Body::PurchaseInvoice(raw_entry.try_into()?)),
-                Some("Sales Invoice") => Ok(Body::SaleInvoice(raw_entry.try_into()?)),
-                Some("Journal Entry") | None => {
+            body: match raw_entry.r#type {
+                Some(EntryType::PaymentSent) => {
+                    anyhow::Ok(Body::PaymentSent(raw_entry.try_into()?))
+                }
+                Some(EntryType::PaymentReceived) => {
+                    Ok(Body::PaymentReceived(raw_entry.try_into()?))
+                }
+                Some(EntryType::PurchaseInvoice) => {
+                    Ok(Body::PurchaseInvoice(raw_entry.try_into()?))
+                }
+                Some(EntryType::SalesInvoice) => Ok(Body::SaleInvoice(raw_entry.try_into()?)),
+                Some(EntryType::JournalEntry) | None => {
                     // TODO refactor this out to reusable function
                     let debit_lines: Box<dyn Iterator<Item = Result<JournalLine>>> =
                         match raw_entry.debits {
@@ -319,7 +325,6 @@ impl TryFrom<raw::Entry> for Entry {
                         .collect::<Result<Vec<_>>>()?;
                     Ok(Body::Journal(JournalLines::new(lines, None)?))
                 }
-                Some(s) => Err(Error::msg(format!("{s} not a valid Entry type"))),
             }?,
         })
     }
@@ -336,11 +341,11 @@ impl From<Entry> for raw::Entry {
         let memo = val.memo();
 
         let r#type = match val.body {
-            Body::Journal(_) => None,
-            Body::PaymentSent(_) => Some("Payment Sent".to_string()),
-            Body::PaymentReceived(_) => Some("Payment Received".to_string()),
-            Body::PurchaseInvoice(_) => Some("Purchase Invoice".to_string()),
-            Body::SaleInvoice(_) => Some("Sale Invoice".to_string()),
+            Body::Journal(_) => Some(EntryType::JournalEntry),
+            Body::PaymentSent(_) => Some(EntryType::PaymentSent),
+            Body::PaymentReceived(_) => Some(EntryType::PaymentReceived),
+            Body::PurchaseInvoice(_) => Some(EntryType::PurchaseInvoice),
+            Body::SaleInvoice(_) => Some(EntryType::SalesInvoice),
         };
 
         let raw_body = match val.body {
@@ -425,12 +430,9 @@ impl FromStr for Entry {
         let mut raw_entry: raw::Entry = serde_yaml::from_str(doc)
             .with_context(|| format!("Failed to deserialize Entry:\n{doc}"))?;
         let id = format!(
-            "{}|{}",
+            "{}|{:?}",
             raw_entry.date,
-            raw_entry
-                .r#type
-                .clone()
-                .unwrap_or("Journal Entry".to_string()),
+            raw_entry.r#type.clone().unwrap_or_default(),
             // TODO some hash or random uid part
         );
         raw_entry.id.get_or_insert(id.clone());
@@ -461,6 +463,7 @@ mod entry_tests {
 
         dbg!(&entry);
 
+        assert_eq!(entry.id(), "2020-01-01|JournalEntry");
         assert_eq!(entry.date(), "2020-01-01".parse()?);
         assert_eq!(entry.memo(), Some("Initial Contribution".to_string()));
 
