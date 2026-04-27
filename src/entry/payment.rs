@@ -10,21 +10,21 @@ pub struct Payment {
     pub amount: Money,
 }
 
-impl TryFrom<raw::Entry> for Payment {
+impl TryFrom<raw::PaymentEntry> for Payment {
     type Error = Error;
 
     fn try_from(
-        raw::Entry {
+        raw::PaymentEntry {
             party,
             account,
             amount,
             ..
-        }: raw::Entry,
+        }: raw::PaymentEntry,
     ) -> Result<Self> {
         Ok(Self {
-            party: party.context("Party required for Payment Entry")?,
-            account: account.context("Account required for Payment Entry")?,
-            amount: amount.context("Amount required for Payment Entry")?,
+            party,
+            account,
+            amount,
         })
     }
 }

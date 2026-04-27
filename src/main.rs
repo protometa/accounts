@@ -131,6 +131,7 @@ async fn main() -> Result<()> {
                         .required(false),
                 ),
         )
+        .subcommand(Command::new("export-schema").about("Exports JSON schema for entries"))
         .get_matches();
 
     if let Some(entries_arg) = matches.value_of("entries") {

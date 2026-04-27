@@ -60,11 +60,11 @@ impl Invoice {
     // TODO impl inventory tracking methods
 }
 
-impl TryFrom<raw::Entry> for Invoice {
+impl TryFrom<raw::InvoiceEntry> for Invoice {
     type Error = Error;
 
     fn try_from(
-        raw::Entry {
+        raw::InvoiceEntry {
             party,
             account,
             items,
@@ -72,14 +72,13 @@ impl TryFrom<raw::Entry> for Invoice {
             payment,
             amount,
             ..
-        }: raw::Entry,
+        }: raw::InvoiceEntry,
     ) -> Result<Self> {
-        let account = account.context("Account required for Invoice")?;
         if !(items.is_some() ^ amount.is_some()) {
             bail!("Either items or amount required for Invoice")
         }
         Ok(Self {
-            party: party.context("Party required for Invoice")?,
+            party,
             account: account.clone(),
             amount: if items.is_none() { amount } else { None },
             items: items

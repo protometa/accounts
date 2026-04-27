@@ -5,14 +5,15 @@ pub mod raw;
 
 use crate::money::Money;
 use JournalAmount::{Credit, Debit};
-use anyhow::{Context, Error, Result};
+use anyhow::{Context, Error, Result, bail};
 use chrono::prelude::*;
 use invoice::InvoiceItemAmount::{ByRate, Total};
 use invoice::{Invoice, default_monthly_rrule};
 use journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine, JournalLines};
 use payment::*;
-use raw::{EntryType, ExpandedLine, Lines};
+use raw::{ExpandedLine, InvoiceEntryType, Lines, PaymentEntryType};
 use rrule::RRule;
+use std::any::Any;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::iter::{self, Iterator};
@@ -254,17 +255,19 @@ impl TryFrom<raw::Entry> for Entry {
     type Error = Error;
 
     fn try_from(raw_entry: raw::Entry) -> Result<Self> {
-        let date: NaiveDate = raw_entry.date.parse()?;
-        let end: Option<NaiveDate> = raw_entry.end.clone().map(|s| s.parse()).transpose()?;
+        let date: NaiveDate = raw_entry.date().parse()?;
+        // TODO handle this intrinsically when parsed as invoice
+        let end: Option<NaiveDate> = raw_entry.end().map(|s| s.parse()).transpose()?;
         Ok(Entry {
             // TODO make better IDs
             // id: raw_entry.id.clone().context("Id missing!")?,
-            id: raw_entry.id.clone().unwrap_or_default(),
+            id: raw_entry.id().unwrap_or_default(),
 
             // `date` is single date unless `repeat` is specified then becomes rrule
             // rrule is parsed from optional `repeat` and `end` fields
             // treating string 'monthly' as generic monthly rrule
-            date: raw_entry.repeat.clone().map_or::<Result<_>, _>(
+            // TODO handle this intrinsically when parsed as invoice
+            date: raw_entry.repeat().map_or::<Result<_>, _>(
                 Ok(Date::SingleDate(date)),
                 |rule_str| {
                     let ed = match rule_str.to_uppercase().as_str() {
@@ -278,47 +281,51 @@ impl TryFrom<raw::Entry> for Entry {
                     Ok(Date::RRule(Box::new(ed)))
                 },
             )?,
-            memo: raw_entry.memo.to_owned(),
-            body: match raw_entry.r#type {
-                Some(EntryType::PaymentSent) => {
-                    anyhow::Ok(Body::PaymentSent(raw_entry.try_into()?))
-                }
-                Some(EntryType::PaymentReceived) => {
-                    Ok(Body::PaymentReceived(raw_entry.try_into()?))
-                }
-                Some(EntryType::PurchaseInvoice) => {
-                    Ok(Body::PurchaseInvoice(raw_entry.try_into()?))
-                }
-                Some(EntryType::SalesInvoice) => Ok(Body::SaleInvoice(raw_entry.try_into()?)),
-                Some(EntryType::JournalEntry) | None => {
+            memo: raw_entry.memo(),
+            body: match raw_entry {
+                raw::Entry::PaymentEntry(raw_entry) => match raw_entry.r#type {
+                    PaymentEntryType::PaymentSent => {
+                        anyhow::Ok(Body::PaymentSent(raw_entry.try_into()?))
+                    }
+                    PaymentEntryType::PaymentReceived => {
+                        Ok(Body::PaymentReceived(raw_entry.try_into()?))
+                    }
+                },
+                raw::Entry::InvoiceEntry(raw_entry) => match raw_entry.r#type {
+                    InvoiceEntryType::PurchaseInvoice => {
+                        Ok(Body::PurchaseInvoice(raw_entry.try_into()?))
+                    }
+                    InvoiceEntryType::SalesInvoice => Ok(Body::SaleInvoice(raw_entry.try_into()?)),
+                },
+                raw::Entry::JournalEntry(raw_entry) => {
                     // TODO refactor this out to reusable function
                     let debit_lines: Box<dyn Iterator<Item = Result<JournalLine>>> =
                         match raw_entry.debits {
-                            Some(Lines::Simple(hashmap)) => {
+                            Lines::Simple(hashmap) => {
                                 Box::new(hashmap.into_iter().map(|(account, amount)| {
                                     Ok(JournalLine(account.to_owned(), Debit(amount)))
                                 }))
                             }
-                            Some(Lines::Expanded(expanded)) => Box::new(expanded.into_iter().map(
+                            Lines::Expanded(expanded) => Box::new(expanded.into_iter().map(
                                 |ExpandedLine { account, amount }| {
                                     Ok(JournalLine(account.to_owned(), Debit(amount)))
                                 },
                             )),
-                            None => Box::new(std::iter::empty()),
+                            Lines::Empty => bail!("Debit lines cannot be empty"),
                         };
                     let credit_lines: Box<dyn Iterator<Item = Result<JournalLine>>> =
                         match raw_entry.credits {
-                            Some(Lines::Simple(hashmap)) => {
+                            Lines::Simple(hashmap) => {
                                 Box::new(hashmap.into_iter().map(|(account, amount)| {
                                     Ok(JournalLine(account.to_owned(), Credit(amount)))
                                 }))
                             }
-                            Some(Lines::Expanded(expanded)) => Box::new(expanded.into_iter().map(
+                            Lines::Expanded(expanded) => Box::new(expanded.into_iter().map(
                                 |ExpandedLine { account, amount }| {
                                     Ok(JournalLine(account.to_owned(), Credit(amount)))
                                 },
                             )),
-                            None => Box::new(std::iter::empty()),
+                            Lines::Empty => bail!("Credit lines cannot be empty"),
                         };
                     let lines = credit_lines
                         .chain(debit_lines)
@@ -340,15 +347,7 @@ impl From<Entry> for raw::Entry {
         let date = val.date().to_string();
         let memo = val.memo();
 
-        let r#type = match val.body {
-            Body::Journal(_) => Some(EntryType::JournalEntry),
-            Body::PaymentSent(_) => Some(EntryType::PaymentSent),
-            Body::PaymentReceived(_) => Some(EntryType::PaymentReceived),
-            Body::PurchaseInvoice(_) => Some(EntryType::PurchaseInvoice),
-            Body::SaleInvoice(_) => Some(EntryType::SalesInvoice),
-        };
-
-        let raw_body = match val.body {
+        match val.body.clone() {
             Body::Journal(lines) => {
                 let debits: HashMap<String, Money> = lines
                     .iter()
@@ -360,20 +359,27 @@ impl From<Entry> for raw::Entry {
                     .collect();
 
                 // TODO check to see if this is a case where expanded lines should be used
-                raw::Entry {
+                raw::Entry::JournalEntry(raw::JournalEntry {
                     r#type: None,
-                    debits: Some(Lines::Simple(debits)),
-                    credits: Some(Lines::Simple(credits)),
+                    debits: Lines::Simple(debits),
+                    credits: Lines::Simple(credits),
                     ..Default::default()
-                }
+                })
             }
-            Body::PaymentSent(payment) | Body::PaymentReceived(payment) => raw::Entry {
-                r#type,
-                party: Some(payment.party),
-                account: Some(payment.account),
-                amount: Some(payment.amount),
-                ..Default::default()
-            },
+            Body::PaymentSent(payment) | Body::PaymentReceived(payment) => {
+                let r#type = match val.body {
+                    Body::PaymentSent(_) => raw::PaymentEntryType::PaymentSent,
+                    Body::PaymentReceived(_) => raw::PaymentEntryType::PaymentReceived,
+                    _ => unreachable!(),
+                };
+                raw::Entry::PaymentEntry(raw::PaymentEntry {
+                    r#type,
+                    party: payment.party,
+                    account: payment.account,
+                    amount: payment.amount,
+                    ..Default::default()
+                })
+            }
             Body::PurchaseInvoice(invoice) | Body::SaleInvoice(invoice) => {
                 let items = if invoice.items.is_empty() {
                     None
@@ -401,26 +407,23 @@ impl From<Entry> for raw::Entry {
                             .collect(),
                     ))
                 };
-                raw::Entry {
+                let r#type = match val.body {
+                    Body::SaleInvoice(_) => raw::InvoiceEntryType::SalesInvoice,
+                    Body::PurchaseInvoice(_) => raw::InvoiceEntryType::PurchaseInvoice,
+                    _ => unreachable!(),
+                };
+                raw::Entry::InvoiceEntry(raw::InvoiceEntry {
                     r#type,
-                    party: Some(invoice.party),
-                    account: Some(invoice.account),
+                    party: invoice.party,
+                    account: invoice.account,
                     amount: invoice.amount,
                     items,
                     // TODO include extras
                     payment: invoice.payment,
                     ..Default::default()
-                }
+                })
             }
-        };
-
-        // Ok(raw::Entry {
-        raw::Entry {
-            date,
-            memo,
-            ..raw_body
         }
-        // })
     }
 }
 
@@ -429,13 +432,10 @@ impl FromStr for Entry {
     fn from_str(doc: &str) -> Result<Self> {
         let mut raw_entry: raw::Entry = serde_yaml::from_str(doc)
             .with_context(|| format!("Failed to deserialize Entry:\n{doc}"))?;
-        let id = format!(
-            "{}|{:?}",
-            raw_entry.date,
-            raw_entry.r#type.clone().unwrap_or_default(),
-            // TODO some hash or random uid part
-        );
-        raw_entry.id.get_or_insert(id.clone());
+        // TODO some hash or random uid part in id
+        dbg!(raw_entry.clone().type_str());
+        let id = format!("{}|{}", raw_entry.date(), raw_entry.clone().type_str());
+        raw_entry.set_id(id.clone());
         let entry: Entry = raw_entry
             .try_into()
             .with_context(|| format!("Failed to convert Entry: {id}"))?;
@@ -463,7 +463,7 @@ mod entry_tests {
 
         dbg!(&entry);
 
-        assert_eq!(entry.id(), "2020-01-01|JournalEntry");
+        assert_eq!(entry.id(), "2020-01-01|Journal Entry");
         assert_eq!(entry.date(), "2020-01-01".parse()?);
         assert_eq!(entry.memo(), Some("Initial Contribution".to_string()));
 
@@ -649,9 +649,10 @@ mod entry_tests {
         "}
         .parse();
 
+        // TODO improve error message
         dbg!(&entry);
         assert!(
-            matches!(entry, Err(e) if dbg!(e.source().unwrap().to_string()).contains("unknown field"))
+            matches!(entry, Err(e) if dbg!(e.source().unwrap().to_string()).contains("data did not match any variant of untagged enum Entry"))
         );
         Ok(())
     }
