@@ -1,5 +1,6 @@
 use anyhow::{Context, Error, Result};
 use rust_decimal::prelude::*;
+use schemars::{JsonSchema, Schema, json_schema};
 use serde::de::{self, Deserializer, Visitor};
 use serde::{Serialize, Serializer};
 use std::cmp::Eq;
@@ -155,6 +156,23 @@ impl<'de> Visitor<'de> for MyValueVisitor {
     {
         Money::try_from(value as f64)
             .map_err(|_| serde::de::Error::custom("Failed to convert money from number"))
+    }
+}
+
+impl JsonSchema for Money {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Money".into()
+    }
+    fn schema_id() -> std::borrow::Cow<'static, str> {
+        // Include the module, in case a type with the same name is in another module/crate
+        concat!(module_path!(), "::Money").into()
+    }
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let pattern = r#"^\$?[,0-9]*(\.[0-9]{2,})?$"#;
+        json_schema!({
+            "type": ["number", "string"],
+            "pattern": pattern
+        })
     }
 }
 

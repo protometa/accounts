@@ -12,6 +12,7 @@ use entry::{
     raw,
 };
 use futures::{future, stream::TryStreamExt};
+use schemars::schema_for;
 use std::fs;
 
 #[async_std::main]
@@ -267,6 +268,9 @@ async fn main() -> Result<()> {
                     }
                 }
             })
+        } else if matches.subcommand_matches("export-schema").is_some() {
+            let schema = schema_for!(raw::Entry);
+            println!("{}", serde_json::to_string_pretty(&schema).unwrap());
         }
     };
     Ok(())

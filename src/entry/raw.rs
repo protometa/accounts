@@ -1,9 +1,10 @@
 use crate::money::Money;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::collections::HashMap;
 
-#[derive(Debug, Deserialize, PartialEq, Clone, Serialize, Default)]
+#[derive(Debug, Deserialize, PartialEq, Clone, Serialize, Default, JsonSchema)]
 #[serde(untagged)]
 pub enum Lines {
     #[default]
@@ -12,20 +13,20 @@ pub enum Lines {
     Expanded(Vec<ExpandedLine>),
 }
 
-#[derive(Debug, Deserialize, PartialEq, Clone, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Clone, Serialize, JsonSchema)]
 pub struct ExpandedLine {
     pub account: String,
     pub amount: Money,
 }
 
-#[derive(Debug, Default, Deserialize, PartialEq, Clone, Serialize)]
+#[derive(Debug, Default, Deserialize, PartialEq, Clone, Serialize, JsonSchema)]
 pub enum JournalEntryType {
     #[default]
     #[serde(rename = "Journal Entry")]
     JournalEntry,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Clone, Serialize, Default)]
+#[derive(Debug, Deserialize, PartialEq, Clone, Serialize, Default, JsonSchema)]
 pub enum InvoiceEntryType {
     #[default]
     #[serde(rename = "Purchase Invoice")]
@@ -34,7 +35,7 @@ pub enum InvoiceEntryType {
     SalesInvoice,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Clone, Serialize, Default)]
+#[derive(Debug, Deserialize, PartialEq, Clone, Serialize, Default, JsonSchema)]
 pub enum PaymentEntryType {
     #[default]
     #[serde(rename = "Payment Sent")]
@@ -44,7 +45,7 @@ pub enum PaymentEntryType {
 }
 
 /// Raw struct deserilized from yaml
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(untagged)]
 pub enum Entry {
@@ -55,7 +56,7 @@ pub enum Entry {
 
 /// Raw struct deserilized from yaml
 #[skip_serializing_none]
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct JournalEntry {
     pub id: Option<String>, // if not specified will use filename TODO needs more work
@@ -68,7 +69,7 @@ pub struct JournalEntry {
 
 /// Raw struct deserilized from yaml
 #[skip_serializing_none]
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PaymentEntry {
     pub id: Option<String>, // if not specified will use filename TODO needs more work
@@ -82,7 +83,7 @@ pub struct PaymentEntry {
 
 /// Raw struct deserilized from yaml
 #[skip_serializing_none]
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InvoiceEntry {
     pub id: Option<String>, // if not specified will use filename TODO needs more work
@@ -161,7 +162,7 @@ impl Entry {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq, Clone, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Clone, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Items {
     Simple(HashMap<String, Money>),
@@ -184,7 +185,7 @@ impl Items {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default, JsonSchema)]
 pub struct Item {
     pub description: Option<String>,
     pub code: Option<String>,    // include if tracking
@@ -194,7 +195,7 @@ pub struct Item {
     pub rate: Option<Money>,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Extra {
     pub description: Option<String>,
     pub account: String,
@@ -202,7 +203,7 @@ pub struct Extra {
     pub rate: Option<f64>,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Payment {
     pub account: String,
     pub amount: Money,
