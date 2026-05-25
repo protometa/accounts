@@ -91,7 +91,7 @@ pub struct InvoiceEntry {
     pub r#type: InvoiceEntryType,
     pub memo: Option<String>,
     pub party: String,
-    pub account: String,
+    pub account: Option<String>,
     pub amount: Option<Money>,
     pub items: Option<Items>,
     pub extras: Option<Vec<Extra>>,

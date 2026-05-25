@@ -433,7 +433,6 @@ impl FromStr for Entry {
         let mut raw_entry: raw::Entry = serde_yaml::from_str(doc)
             .with_context(|| format!("Failed to deserialize Entry:\n{doc}"))?;
         // TODO some hash or random uid part in id
-        dbg!(raw_entry.clone().type_str());
         let id = format!("{}|{}", raw_entry.date(), raw_entry.clone().type_str());
         raw_entry.set_id(id.clone());
         let entry: Entry = raw_entry
@@ -601,6 +600,64 @@ mod entry_tests {
             JournalAmount::debit(0.05)?
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn parse_invoice_no_default_account_with_total_amount() -> Result<()> {
+        // default account field is optional if all items specify account
+        // total amount field is checked against items
+        let entry: Entry = indoc! {"
+            type: Purchase Invoice
+            date: 2021-01-01
+            memo: Business Loan
+            party: ACME Credit Union
+            items:
+              - account: Loan
+                amount: $100.00
+              - account: Interest
+                amount: $10.00
+            amount: $110.00
+        "}
+        .parse()?;
+
+        dbg!(&entry);
+        assert_eq!(
+            entry.amount_of_account("Accounts Payable").unwrap(),
+            JournalAmount::credit(110.00)?
+        );
+        assert_eq!(
+            entry.amount_of_account("Loan").unwrap(),
+            JournalAmount::debit(100.00)?
+        );
+        assert_eq!(
+            entry.amount_of_account("Interest").unwrap(),
+            JournalAmount::debit(10.00)?
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_invoice_total_amount_error() -> Result<()> {
+        // total amount provided but not correct
+        let entry: Result<Entry> = indoc! {"
+            type: Purchase Invoice
+            date: 2021-01-01
+            party: ACME Credit Union
+            items:
+              - account: Loan
+                amount: $100.00
+              - account: Interest
+                amount: $10.00
+            amount: $100.00
+        "}
+        .parse();
+
+        dbg!(&entry);
+        assert!(
+            matches!(entry, Err(e) if dbg!(e.source().unwrap().to_string()).contains("Invoice ammount does not equal items total amount"))
+        );
         Ok(())
     }
 

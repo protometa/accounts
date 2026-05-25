@@ -6,6 +6,7 @@ use crate::money::Money;
 use anyhow::{Context, Error, Result, bail};
 use chrono::prelude::*;
 use chrono_tz::UTC;
+use num_traits::Zero;
 use rrule::{Frequency, RRuleProperties};
 use rust_decimal::Decimal;
 use std::convert::{TryFrom, TryInto};
@@ -13,7 +14,7 @@ use std::convert::{TryFrom, TryInto};
 #[derive(Debug, Clone)]
 pub struct Invoice {
     pub party: String,
-    pub account: JournalAccount,
+    pub account: Option<JournalAccount>,
     pub amount: Option<Money>,
     pub items: Vec<InvoiceItem>,
     pub extras: Option<Vec<InvoiceExtra>>,
@@ -44,7 +45,11 @@ impl Invoice {
             let amount = self
                 .amount
                 .context("Items empty and no amount in invoice")?;
-            Ok(vec![(self.account.clone(), amount)])
+            let account = self
+                .account
+                .clone()
+                .context("Items empty and no account in invoice")?;
+            Ok(vec![(account, amount)])
         }
     }
 
@@ -55,6 +60,14 @@ impl Invoice {
         } else {
             Ok(vec![])
         }
+    }
+
+    pub fn total(&self) -> Result<Money> {
+        let total = self
+            .bill_lines()?
+            .iter()
+            .fold(Money::zero(), |t, &(_, m)| t + m);
+        Ok(total)
     }
 
     // TODO impl inventory tracking methods
@@ -74,10 +87,10 @@ impl TryFrom<raw::InvoiceEntry> for Invoice {
             ..
         }: raw::InvoiceEntry,
     ) -> Result<Self> {
-        if !(items.is_some() ^ amount.is_some()) {
-            bail!("Either items or amount required for Invoice")
+        if items.is_none() && amount.is_none() {
+            bail!("Either items or amount (or both) required for Invoice")
         }
-        Ok(Self {
+        let invoice = Self {
             party,
             account: account.clone(),
             amount: if items.is_none() { amount } else { None },
@@ -85,7 +98,11 @@ impl TryFrom<raw::InvoiceEntry> for Invoice {
                 .iter() // iterate over Option to flatten and collect
                 .flat_map(|items| {
                     items.as_expanded().into_iter().map(|mut raw_item| {
-                        raw_item.account.get_or_insert(account.clone());
+                        let item_account = raw_item.account.or(account.clone());
+                        if item_account.is_none() {
+                            bail!("If invoice does not contain default account, then all items must specify account");
+                        }
+                        raw_item.account = item_account;
                         raw_item.try_into()
                     })
                 })
@@ -106,7 +123,12 @@ impl TryFrom<raw::InvoiceEntry> for Invoice {
                     })
                 })
                 .transpose()?,
-        })
+        };
+        let total = invoice.total()?; // this also serves to validate invoice
+        if amount.is_some_and(|a| a != total) {
+            bail!("Invoice ammount does not equal items total amount");
+        }
+        Ok(invoice)
     }
 }
 
