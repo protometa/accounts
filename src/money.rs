@@ -16,6 +16,7 @@ pub struct Money(pub Decimal);
 impl TryFrom<f64> for Money {
     type Error = Error;
 
+    // TODO consider banker's rounding
     fn try_from(f: f64) -> Result<Self> {
         let mut d = Decimal::from_f64(f).context(format!("Failed to convert {f} to Money"))?;
         if d.scale() < 2 {
@@ -28,11 +29,9 @@ impl TryFrom<f64> for Money {
 impl TryFrom<u64> for Money {
     type Error = Error;
 
-    fn try_from(f: u64) -> Result<Self> {
-        let mut d = Decimal::from_u64(f).context(format!("Failed to convert {f} to Money"))?;
-        if d.scale() < 2 {
-            d.rescale(2);
-        }
+    fn try_from(i: u64) -> Result<Self> {
+        let mut d = Decimal::from_u64(i).context(format!("Failed to convert {i} to Money"))?;
+        d.rescale(2);
         Ok(Self(d))
     }
 }
@@ -110,7 +109,6 @@ impl Serialize for Money {
         S: Serializer,
     {
         // TODO support other currencies
-
         let m = self.0.to_string();
         serializer.serialize_str(&format!("${m}"))
     }
@@ -154,7 +152,7 @@ impl<'de> Visitor<'de> for MyValueVisitor {
     where
         E: de::Error,
     {
-        Money::try_from(value as f64)
+        Money::try_from(value)
             .map_err(|_| serde::de::Error::custom("Failed to convert money from number"))
     }
 }
@@ -195,6 +193,14 @@ mod money_tests {
         // more than 2 dp
         let m: Money = 1.111.try_into()?;
         assert_eq!(m.to_string(), "$1.111");
+
+        Ok(())
+    }
+
+    #[test]
+    fn money_from_u64() -> Result<()> {
+        let m: Money = 1u64.try_into()?;
+        assert_eq!(m.to_string(), "$1.00");
 
         Ok(())
     }
