@@ -1,6 +1,6 @@
 use anyhow::{Context, Error, Result};
 use rust_decimal::prelude::*;
-use schemars::{JsonSchema, Schema, json_schema};
+use schemars::{JsonSchema, json_schema};
 use serde::de::{self, Deserializer, Visitor};
 use serde::{Serialize, Serializer};
 use std::cmp::Eq;

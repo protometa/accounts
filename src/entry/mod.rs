@@ -7,13 +7,12 @@ use crate::money::Money;
 use JournalAmount::{Credit, Debit};
 use anyhow::{Context, Error, Result, bail};
 use chrono::prelude::*;
-use invoice::InvoiceItemAmount::{ByRate, Total};
+use invoice::InvoiceItemAmount::ByRate;
 use invoice::{Invoice, default_monthly_rrule};
 use journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine, JournalLines};
 use payment::*;
 use raw::{ExpandedLine, InvoiceEntryType, Lines, PaymentEntryType};
 use rrule::RRule;
-use std::any::Any;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::iter::{self, Iterator};
@@ -39,7 +38,7 @@ impl Date {
     fn iter(&self) -> Box<dyn Iterator<Item = NaiveDate> + '_> {
         match self {
             Date::SingleDate(date) => Box::new(iter::once(*date)),
-            Date::RRule(rrule) => Box::new(rrule.into_iter().map(|d| d.date().naive_utc())),
+            Date::RRule(rrule) => Box::new(rrule.into_iter().map(|d| d.date_naive())),
         }
     }
 
@@ -48,7 +47,7 @@ impl Date {
             Date::SingleDate(date) => *date,
             Date::RRule(rrule) => {
                 // RRule zones are all treated as utc
-                rrule.get_properties().dt_start.date().naive_utc()
+                rrule.get_properties().dt_start.date_naive()
             }
         }
     }
@@ -165,10 +164,7 @@ impl Entry {
     /// Get all journal entries of possibly recurring entry
     // TODO why doesn't this return an iterator?
     pub fn to_journal_entries(&self, until: Option<NaiveDate>) -> Result<Vec<JournalEntry>> {
-        let until = until.unwrap_or({
-            let today = Local::today();
-            NaiveDate::from_ymd(today.year(), today.month(), today.day())
-        });
+        let until = until.unwrap_or(Local::now().date_naive());
         self.dates(until)
             .map(|date| self.to_journal_entry_for_date(date))
             .collect::<Result<Vec<JournalEntry>>>()
@@ -274,7 +270,7 @@ impl TryFrom<raw::Entry> for Entry {
                         // if simply MONTHLY use basic monthy rrule
                         "MONTHLY" => RRule::new(end.map_or(default_monthly_rrule(date), |end| {
                             default_monthly_rrule(date)
-                                .until(Utc.from_utc_datetime(&end.and_hms(0, 0, 0)))
+                                .until(Utc.from_utc_datetime(&end.and_hms_opt(0, 0, 0).unwrap()))
                         }))?,
                         rule_str => rule_str.parse()?,
                     };
@@ -360,9 +356,11 @@ impl From<Entry> for raw::Entry {
 
                 // TODO check to see if this is a case where expanded lines should be used
                 raw::Entry::JournalEntry(raw::JournalEntry {
+                    date,
                     r#type: None,
                     debits: Lines::Simple(debits),
                     credits: Lines::Simple(credits),
+                    memo,
                     ..Default::default()
                 })
             }
@@ -373,10 +371,12 @@ impl From<Entry> for raw::Entry {
                     _ => unreachable!(),
                 };
                 raw::Entry::PaymentEntry(raw::PaymentEntry {
+                    date,
                     r#type,
                     party: payment.party,
                     account: payment.account,
                     amount: payment.amount,
+                    memo,
                     ..Default::default()
                 })
             }
@@ -413,9 +413,11 @@ impl From<Entry> for raw::Entry {
                     _ => unreachable!(),
                 };
                 raw::Entry::InvoiceEntry(raw::InvoiceEntry {
+                    date,
                     r#type,
                     party: invoice.party,
                     account: invoice.account,
+                    memo,
                     amount: invoice.amount,
                     items,
                     // TODO include extras

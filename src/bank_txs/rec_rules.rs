@@ -391,7 +391,7 @@ impl GenEntry {
         // TODO since rules can generate any type of entry, allow matching on other types
         // eg if party of payment entry doesn't match
 
-        let (evaled, templated) = self.evaluate()?;
+        let (evaled, _templated) = self.evaluate()?;
 
         // TODO allow date range (bank tx dates may lag behind entries)
         // (matching of a very late payment could be overridden by a specific rule)

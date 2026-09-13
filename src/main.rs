@@ -1,8 +1,5 @@
 // use accounts;
-use accounts::{
-    bank_txs::rec_rules::GenEntry, chart_of_accounts::ChartOfAccounts, entry::journal::JournalLine,
-    *,
-};
+use accounts::{chart_of_accounts::ChartOfAccounts, *};
 use anyhow::Result;
 use bank_txs::BankTxs;
 use clap::{Arg, Command};
@@ -12,6 +9,7 @@ use entry::{
     raw,
 };
 use futures::{future, stream::TryStreamExt};
+use itertools::Itertools;
 use schemars::schema_for;
 use std::fs;
 
@@ -55,6 +53,19 @@ async fn main() -> Result<()> {
                         .short('w')
                         .long("with-party")
                         .help("Show lines with party field"),
+                ),
+        )
+        .subcommand(
+            Command::new("ledger")
+                .about("Shows ledger for given account")
+                .arg(
+                    Arg::new("account")
+                        .short('a')
+                        .long("account")
+                        .help("Account of ledger")
+                        .value_name("ACCOUNT")
+                        .required(true)
+                        .takes_value(true),
                 ),
         )
         .subcommand(
@@ -136,10 +147,10 @@ async fn main() -> Result<()> {
         .get_matches();
 
     if let Some(entries_arg) = matches.value_of("entries") {
-        let ledger = if entries_arg == "-" {
-            Ledger::new(None)
+        let instance = if entries_arg == "-" {
+            Accounts::new(None)
         } else {
-            Ledger::new(Some(entries_arg))
+            Accounts::new(Some(entries_arg))
         };
         if let Some(journal) = matches.subcommand_matches("journal") {
             // TODO walk dir sorted and add check to assert date order and process this iteratively instead of collecting
@@ -148,7 +159,7 @@ async fn main() -> Result<()> {
             let party = journal.value_of("party");
             let with_party = journal.is_present("with-party");
 
-            let mut entries: Vec<JournalEntry> = ledger
+            let mut entries: Vec<JournalEntry> = instance
                 .journal_filtered(account, party)
                 .try_collect()
                 .await?;
@@ -158,11 +169,34 @@ async fn main() -> Result<()> {
                 println!("{rows}");
                 anyhow::Ok(())
             })?;
+        } else if let Some(ledger) = matches.subcommand_matches("ledger") {
+            let account = ledger.value_of("account").unwrap();
+
+            let ledger_lines: Vec<LedgerLine> = instance.ledger(account).try_collect().await?;
+            // with running totals
+            ledger_lines
+                .iter()
+                .sorted_by_key(|l| l.date)
+                .scan(JournalAmount::default(), |acc, line| {
+                    *acc += line.amount;
+                    Some(LedgerLine {
+                        running_total: *acc,
+                        ..line.clone()
+                    })
+                })
+                .for_each(|line| {
+                    let amt_pad = 12;
+                    let date = line.date;
+                    let amt_string = line.amount.to_row_string(amt_pad);
+                    let total_string = line.running_total.to_row_string(amt_pad);
+                    let memo = line.memo.unwrap_or_default();
+                    println!("{date} | {amt_string} | {total_string} | {memo}");
+                });
         } else if let Some(balances) = matches.subcommand_matches("balances") {
             let party = balances.value_of("party");
             let account = balances.value_of("account");
 
-            let balances = ledger.balances_filtered(account, party).await?;
+            let balances = instance.balances_filtered(account, party).await?;
             let total = balances
                 .iter()
                 .fold(JournalAmount::default(), |mut acc, amount| {
@@ -187,18 +221,18 @@ async fn main() -> Result<()> {
             ) {
                 let chart = ChartOfAccounts::from_file(chart).await?;
                 let mut report = fs::read_to_string(spec)?.parse()?;
-                let report = ledger.run_report(&chart, &mut report).await?;
+                let report = instance.run_report(&chart, &mut report).await?;
                 println!("{report}")
             }
         } else if matches.subcommand_matches("payable").is_some() {
-            let payables = ledger.payable().await?;
+            let payables = instance.payable().await?;
             let mut payables: Vec<_> = payables.iter().collect();
             payables.sort_by_key(|x| x.0);
             payables.iter().for_each(|(account, amount)| {
                 println!("{:32} | {}", account, amount.to_row_string(12));
             });
         } else if matches.subcommand_matches("receivable").is_some() {
-            let receivables = ledger.receivable().await?;
+            let receivables = instance.receivable().await?;
             let mut receivables: Vec<_> = receivables.iter().collect();
             receivables.sort_by_key(|x| x.0);
             receivables.iter().for_each(|(account, amount)| {
@@ -210,7 +244,7 @@ async fn main() -> Result<()> {
             let rules_file = reconcile.value_of("rules");
             let mut txs = BankTxs::from_files(txs_file, rules_file).await?;
 
-            ledger
+            instance
                 .entries_filtered(Some(account), None)
                 .try_for_each(|entry: Entry| {
                     let matched = txs.match_and_rm(entry.clone());

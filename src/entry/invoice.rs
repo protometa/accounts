@@ -24,7 +24,7 @@ pub struct Invoice {
 pub fn default_monthly_rrule(date: NaiveDate) -> RRuleProperties {
     RRuleProperties::new(
         Frequency::Monthly,
-        UTC.from_utc_datetime(&date.and_hms(0, 0, 0)),
+        UTC.from_utc_datetime(&date.and_hms_opt(0, 0, 0).unwrap()),
     )
     .by_month_day(vec![date.day().try_into().unwrap()]) // unwrap ok, always <= 31
 }
@@ -150,10 +150,7 @@ impl TryFrom<raw::Item> for InvoiceItem {
             code,
             account: account.context("No account for Item!")?,
             amount: match (quantity, rate, amount) {
-                (Some(quantity), Some(rate), None) => InvoiceItemAmount::ByRate {
-                    quantity,
-                    rate: rate.try_into()?,
-                },
+                (Some(quantity), Some(rate), None) => InvoiceItemAmount::ByRate { quantity, rate },
                 (None, None, Some(amount)) => InvoiceItemAmount::Total(amount),
                 _ => bail!(
                     "Invoice Item must specify either amount \

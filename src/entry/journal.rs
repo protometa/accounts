@@ -10,8 +10,6 @@ use std::convert::TryInto;
 use std::fmt;
 use std::ops::{AddAssign, Deref};
 
-use super::Entry;
-
 pub type JournalAccount = String;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

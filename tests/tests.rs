@@ -14,8 +14,8 @@ use std::convert::TryInto;
 /// Test that a dir containing one entry per file parses without error
 #[async_std::test]
 async fn test_basic_entries() -> Result<()> {
-    let ledger = Ledger::new(Some("./tests/fixtures/entries_flat"));
-    let entries = ledger.entries().try_collect::<Vec<Entry>>().await?;
+    let instance = Accounts::new(Some("./tests/fixtures/entries_flat"));
+    let entries = instance.entries().try_collect::<Vec<Entry>>().await?;
     dbg!(&entries);
     let count = entries.iter().map(|entry| entry.id()).unique().count();
     assert_eq!(count, 3);
@@ -25,8 +25,8 @@ async fn test_basic_entries() -> Result<()> {
 /// Test that a dir containing nested dirs parses without error
 #[async_std::test]
 async fn test_nested_dirs() -> Result<()> {
-    let ledger = Ledger::new(Some("./tests/fixtures/entries_nested_dirs"));
-    let entries = ledger.entries().try_collect::<Vec<Entry>>().await?;
+    let instance = Accounts::new(Some("./tests/fixtures/entries_nested_dirs"));
+    let entries = instance.entries().try_collect::<Vec<Entry>>().await?;
     dbg!(&entries);
     let count = entries.iter().map(|entry| entry.id()).unique().count();
     assert_eq!(count, 2);
@@ -36,10 +36,10 @@ async fn test_nested_dirs() -> Result<()> {
 /// Test that a dir with one file containing multiple entries parses without error
 #[async_std::test]
 async fn test_multiple_entries_in_one_file() -> Result<()> {
-    let ledger = Ledger::new(Some(
+    let instance = Accounts::new(Some(
         "./tests/fixtures/entries_multiple_entries_in_one_file",
     ));
-    let entries = ledger.entries().try_collect::<Vec<Entry>>().await?;
+    let entries = instance.entries().try_collect::<Vec<Entry>>().await?;
     dbg!(&entries);
     let count = entries.iter().map(|entry| entry.id()).unique().count();
     assert_eq!(count, 2);
@@ -49,9 +49,9 @@ async fn test_multiple_entries_in_one_file() -> Result<()> {
 /// Test that journal entries from entries are correct
 #[async_std::test]
 async fn test_journal_from_entries() -> Result<()> {
-    let ledger = Ledger::new(Some("./tests/fixtures/entries"));
+    let instance = Accounts::new(Some("./tests/fixtures/entries"));
 
-    let journal_entries: Vec<JournalEntry> = ledger.journal().try_collect().await?;
+    let journal_entries: Vec<JournalEntry> = instance.journal().try_collect().await?;
 
     assert_eq!(dbg!(&journal_entries).iter().count(), 8);
     Expect(&journal_entries)
@@ -122,11 +122,49 @@ async fn test_journal_from_entries() -> Result<()> {
     Ok(())
 }
 
+/// Test ledger from entries
+#[async_std::test]
+async fn test_ledger() -> Result<()> {
+    let instance = Accounts::new(Some("./tests/fixtures/entries"));
+    let ledger_lines: Vec<LedgerLine> = instance.ledger("Business Checking").try_collect().await?;
+    // with running totals
+    let ledger_lines = ledger_lines
+        .iter()
+        .sorted_by_key(|l| l.date)
+        .scan(JournalAmount::default(), |acc, line| {
+            *acc += line.amount;
+            Some(LedgerLine {
+                running_total: *acc,
+                ..line.clone()
+            })
+        })
+        .collect::<Vec<LedgerLine>>();
+
+    assert_eq!(dbg!(&ledger_lines).iter().count(), 3);
+    Expect(&ledger_lines)
+        .contains(
+            "2020-01-03",
+            JournalAmount::credit(50.00)?,
+            JournalAmount::credit(50.00)?,
+        )
+        .contains(
+            "2020-01-06",
+            JournalAmount::debit(10.00)?,
+            JournalAmount::credit(40.00)?,
+        )
+        .contains(
+            "2020-01-07",
+            JournalAmount::debit(5.00)?,
+            JournalAmount::credit(35.00)?,
+        );
+    Ok(())
+}
+
 /// Test balances from entries
 #[async_std::test]
 async fn test_balance() -> Result<()> {
-    let ledger = Ledger::new(Some("./tests/fixtures/entries"));
-    let balances = ledger.balances().await?;
+    let instance = Accounts::new(Some("./tests/fixtures/entries"));
+    let balances = instance.balances().await?;
     assert_eq!(balances.len(), 6);
     Expect(&balances)
         .contains("Operating Expenses", Debit(250.00))
@@ -141,9 +179,9 @@ async fn test_balance() -> Result<()> {
 /// Test journal entries from recurring entries
 #[async_std::test]
 async fn test_recurring() -> Result<()> {
-    let ledger = Ledger::new(Some("./tests/fixtures/entries_recurring"));
+    let instance = Accounts::new(Some("./tests/fixtures/entries_recurring"));
 
-    let journal_entries: Vec<JournalEntry> = ledger.journal().try_collect().await?;
+    let journal_entries: Vec<JournalEntry> = instance.journal().try_collect().await?;
 
     assert_eq!(dbg!(&journal_entries).iter().count(), 6);
     Expect(&journal_entries)
@@ -240,11 +278,11 @@ async fn test_report() -> Result<()> {
 
 #[async_std::test]
 async fn test_run_report() -> Result<()> {
-    let ledger = Ledger::new(Some("./tests/fixtures/entries"));
+    let instance = Accounts::new(Some("./tests/fixtures/entries"));
     let chart_of_accounts =
         ChartOfAccounts::from_file("./tests/fixtures/ChartOfAccounts.yaml").await?;
     let mut report = ReportNode::from_file("./tests/fixtures/IncomeStatement.yaml").await?;
-    ledger.run_report(&chart_of_accounts, &mut report).await?;
+    instance.run_report(&chart_of_accounts, &mut report).await?;
     let items = report.items()?;
     dbg!(&items);
     println!("{report}");
@@ -289,6 +327,23 @@ enum JournalAmountTest {
 
 /// struct for special assertions
 struct Expect<'a, T>(&'a T);
+
+impl Expect<'_, Vec<LedgerLine>> {
+    fn contains(&self, date: &str, amount: JournalAmount, total: JournalAmount) -> &Self {
+        assert!(
+            self.0.iter().any(|actual| {
+                actual.date.to_string() == date
+                    && actual.amount == amount
+                    && actual.running_total == total
+            }),
+            "ledger line with date {date} amount {:?} and running total {:?} not found in {:?}",
+            amount,
+            total,
+            self.0
+        );
+        self
+    }
+}
 
 impl Expect<'_, Vec<JournalEntry>> {
     fn contains(&self, date: &str, account: &str, amount: JournalAmount) -> &Self {

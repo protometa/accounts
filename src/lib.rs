@@ -22,8 +22,8 @@ use std::borrow::ToOwned;
 use std::collections::HashMap;
 use std::ops::AddAssign;
 
-pub struct Ledger {
-    path: Option<String>,
+pub struct Accounts {
+    journal_path: Option<String>,
 }
 
 type Balances = HashMap<JournalAccount, JournalAmount>;
@@ -64,6 +64,45 @@ pub fn entries_from_lines(
         .boxed()
 }
 
+/// Get ledger of given account from journal entries
+fn ledger_from_journal(
+    journal_entries: BoxStream<Result<JournalEntry>>,
+    account: String,
+) -> BoxStream<Result<LedgerLine>> {
+    journal_entries
+        // flatten to ledger lines
+        .map_ok(move |entry| {
+            stream::iter(entry.lines().into_iter().filter_map({
+                let account = account.clone();
+                move |line| {
+                    if line.0 == account {
+                        Some(Ok(LedgerLine {
+                            date: entry.date(),
+                            memo: entry.memo(),
+                            amount: line.1,
+                            running_total: Default::default(),
+                        }))
+                    } else {
+                        None
+                    }
+                }
+            }))
+        })
+        .try_flatten()
+        // TODO streaming total can be reintroduced here when ordering and entries from recurring entries is worked out
+        // // scan ledger lines for running_total
+        // .scan(JournalAmount::default(), |acc, line| {
+        //     future::ready(Some(line.map(|line| {
+        //         *acc += line.amount;
+        //         LedgerLine {
+        //             running_total: *acc,
+        //             ..line
+        //         }
+        //     })))
+        // })
+        .boxed()
+}
+
 fn balances_from_journal_lines(
     lines: BoxStream<Result<JournalLine>>,
 ) -> impl Future<Output = Result<Balances>> {
@@ -80,11 +119,19 @@ fn balances_from_journal_lines(
     )
 }
 
-impl Ledger {
+#[derive(Debug, Clone)]
+pub struct LedgerLine {
+    pub date: NaiveDate,
+    pub memo: Option<String>,
+    pub amount: JournalAmount,
+    pub running_total: JournalAmount,
+}
+
+impl Accounts {
     // TODO consider making this accept enum for source for stdin, path, or string
     pub fn new(dir: Option<&str>) -> Self {
-        Ledger {
-            path: dir.map(ToOwned::to_owned),
+        Accounts {
+            journal_path: dir.map(ToOwned::to_owned),
         }
     }
 
@@ -101,7 +148,7 @@ impl Ledger {
         // filter by party
         party: Option<&str>,
     ) -> BoxStream<Result<Entry>> {
-        entries_from_lines(lines(self.path.clone()), account, party)
+        entries_from_lines(lines(self.journal_path.clone()), account, party)
     }
 
     /// Convert own stream of `Entry`s into `JournalEntry`s
@@ -128,6 +175,11 @@ impl Ledger {
             .boxed()
     }
 
+    pub fn ledger(&self, account: &str) -> BoxStream<Result<LedgerLine>> {
+        let lines = self.journal_filtered(None, None);
+        ledger_from_journal(lines, account.to_string())
+    }
+
     /// Get balances for each account appearing in own stream of `JournalEntry`s
     pub fn balances(&self) -> impl Future<Output = Result<Balances>> {
         self.balances_filtered(None, None)
@@ -140,12 +192,7 @@ impl Ledger {
         // filter by party
         party: Option<&str>,
     ) -> impl Future<Output = Result<Balances>> {
-        let lines = self
-            .journal_filtered(account, party)
-            .and_then(|entry| async move { Ok(stream::iter(entry.lines()).map(Ok)) })
-            .try_flatten()
-            .boxed();
-
+        let lines = self.journal_lines_filtered(account, party);
         balances_from_journal_lines(lines)
     }
 
