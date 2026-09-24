@@ -2,15 +2,33 @@
 
 use self::JournalAmount::*;
 use crate::money::Money;
-use anyhow::{Error, Result, bail};
+use anyhow::{Error, Result, anyhow, bail};
 use chrono::NaiveDate;
 use num_traits::Zero;
 use std::cmp::Ordering;
 use std::convert::TryInto;
 use std::fmt;
 use std::ops::{AddAssign, Deref};
+use std::str::FromStr;
 
 pub type JournalAccount = String;
+
+pub enum BalanceType {
+    Debit,
+    Credit,
+}
+
+impl FromStr for BalanceType {
+    type Err = Error; // TODO custom parse error?
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "debit" => Ok(BalanceType::Debit),
+            "credit" => Ok(BalanceType::Credit),
+            _ => Err(anyhow!("Balance type \"{s}\" not recognized")),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum JournalAmount {
@@ -34,13 +52,33 @@ impl JournalAmount {
     pub fn credit(n: f64) -> anyhow::Result<Self> {
         Ok(Credit(n.try_into()?))
     }
-    pub fn as_debit(&self) -> Option<Money> {
+
+    pub fn as_debit(&self) -> Money {
+        match self {
+            Debit(money) => *money,
+            Credit(money) => -*money,
+        }
+    }
+    pub fn as_credit(&self) -> Money {
+        match self {
+            Debit(money) => -*money,
+            Credit(money) => *money,
+        }
+    }
+    pub fn as_balance_type(&self, balance: &BalanceType) -> Money {
+        match balance {
+            BalanceType::Debit => self.as_debit(),
+            BalanceType::Credit => self.as_credit(),
+        }
+    }
+
+    pub fn as_abs_debit(&self) -> Option<Money> {
         match self {
             Debit(money) => Some(*money),
             Credit(_) => None,
         }
     }
-    pub fn as_credit(&self) -> Option<Money> {
+    pub fn as_abs_credit(&self) -> Option<Money> {
         match self {
             Debit(_) => None,
             Credit(money) => Some(*money),
@@ -90,8 +128,8 @@ fn test_row_string() -> Result<()> {
     dbg!(&dr_row);
     dbg!(&cr_row);
 
-    assert_eq!(dr_row, "   $100.00 |           ");
-    assert_eq!(cr_row, "           |     $50.00");
+    assert_eq!(dr_row, "    100.00 |           ");
+    assert_eq!(cr_row, "           |      50.00");
 
     Ok(())
 }

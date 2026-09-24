@@ -14,7 +14,6 @@ chrono = "0.4.19"
 rust_decimal = "1.10.1"
 async-walkdir = "0.2.0"
 num-traits = "0.2.14"
-rrule = "0.7.0"
 chrono-tz = "0.6.1"
 clap = "3.0.0-beta.2"
 # lines-ext = { path = "../lines-ext" }
@@ -23,8 +22,13 @@ indoc = "2.0.6"
 rule = "0.1.6"
 serde_json = "1.0.141"
 serde_with = "3.14.0"
-itertools = "0.10.0"
+itertools = "0.15.0"
 schemars = "1.2.1"
+rrule = "0.14.0"
+comfy-table = "8.0.0"
 
 [dev-dependencies]
-itertools = "0.10.0"
+insta = { version = "1.48.0", features = ["yaml"] }
+
+[profile.dev.package]
+insta.opt-level = 3

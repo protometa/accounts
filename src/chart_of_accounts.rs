@@ -1,9 +1,9 @@
 use super::account::*;
-use anyhow::{anyhow, Error, Result};
+use anyhow::{Error, Result, anyhow};
 use async_std::fs::File;
 use async_std::io::BufReader;
 use async_std::prelude::*;
-use futures::{future, TryStreamExt};
+use futures::{TryStreamExt, future};
 use lines_ext::LinesExt;
 
 pub type AccountId = usize;
@@ -32,6 +32,6 @@ impl ChartOfAccounts {
         self.0
             .iter()
             .find(|account| account.name == name)
-            .ok_or_else(|| anyhow!("Account {} not found", name))
+            .ok_or_else(|| anyhow!("Account {name} not found"))
     }
 }

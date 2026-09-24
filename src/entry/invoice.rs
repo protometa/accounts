@@ -5,9 +5,8 @@ use super::{
 use crate::money::Money;
 use anyhow::{Context, Error, Result, bail};
 use chrono::prelude::*;
-use chrono_tz::UTC;
 use num_traits::Zero;
-use rrule::{Frequency, RRuleProperties};
+use rrule::{Frequency, RRule, RRuleError, RRuleSet, Tz};
 use rust_decimal::Decimal;
 use std::convert::{TryFrom, TryInto};
 
@@ -21,12 +20,62 @@ pub struct Invoice {
     pub payment: Option<Payment>,
 }
 
-pub fn default_monthly_rrule(date: NaiveDate) -> RRuleProperties {
-    RRuleProperties::new(
-        Frequency::Monthly,
-        UTC.from_utc_datetime(&date.and_hms_opt(0, 0, 0).unwrap()),
-    )
-    .by_month_day(vec![date.day().try_into().unwrap()]) // unwrap ok, always <= 31
+/// Converts `NaiveDate` to `DateTime<Tz>` that can be used with `rrule`.
+fn naivedate_to_rrule_utc(date: &NaiveDate) -> DateTime<Tz> {
+    rrule::Tz::UTC.from_utc_datetime(&date.and_time(NaiveTime::default()))
+}
+
+#[test]
+fn naivedate_to_rrule_utc_test() -> Result<()> {
+    let date = NaiveDate::from_ymd_opt(2020, 1, 20);
+    let rrule_date = naivedate_to_rrule_utc(&date.unwrap());
+    // assert time and zone are default
+    assert_eq!(rrule_date.to_string(), "2020-01-20 00:00:00 UTC");
+    let date = rrule_date.date_naive();
+    // assert naive date from rrule date
+    assert_eq!(date.to_string(), "2020-01-20");
+    Ok(())
+}
+
+/// Creates simple rrule with frequncy, start, and optional end dates.
+///
+/// **WARNING:** monthly frequency skip months that do not contain
+/// the starting month day!
+pub fn simple_rrule(
+    freq: Frequency,
+    start: NaiveDate,
+    end: Option<NaiveDate>,
+) -> Result<RRuleSet, RRuleError> {
+    let mut rrule = RRule::new(freq);
+    if let Some(end) = end {
+        rrule = rrule.until(naivedate_to_rrule_utc(&end));
+    };
+    rrule.build(naivedate_to_rrule_utc(&start))
+}
+
+#[test]
+fn simple_rrule_monthly_test() -> Result<()> {
+    let start = "2020-11-10".parse()?;
+    let freq = "MONTHLY".parse()?;
+    let mut rrule = simple_rrule(freq, start, None)?.into_iter();
+    // starts with first date
+    assert_eq!(rrule.next().unwrap().date_naive().to_string(), "2020-11-10");
+    // advanced by frequency
+    assert_eq!(rrule.next().unwrap().date_naive().to_string(), "2020-12-10");
+    // rolls over
+    assert_eq!(rrule.next().unwrap().date_naive().to_string(), "2021-01-10");
+    Ok(())
+}
+
+#[test]
+fn simple_rrule_monthly_31_test() -> Result<()> {
+    let start = "2020-01-31".parse()?;
+    let freq = "MONTHLY".parse()?;
+    let mut rrule = simple_rrule(freq, start, None)?.into_iter();
+    assert_eq!(rrule.next().unwrap().date_naive().to_string(), "2020-01-31");
+    // WARNING Feb was skipped since it has no 31st day
+    assert_eq!(rrule.next().unwrap().date_naive().to_string(), "2020-03-31");
+    Ok(())
 }
 
 impl Invoice {

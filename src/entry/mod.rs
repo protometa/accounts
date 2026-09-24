@@ -5,14 +5,15 @@ pub mod raw;
 
 use crate::money::Money;
 use JournalAmount::{Credit, Debit};
-use anyhow::{Context, Error, Result, bail};
+use anyhow::{Context, Error, Result, anyhow, bail};
 use chrono::prelude::*;
 use invoice::InvoiceItemAmount::ByRate;
-use invoice::{Invoice, default_monthly_rrule};
+use invoice::{Invoice, simple_rrule};
+use itertools::Itertools;
 use journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine, JournalLines};
 use payment::*;
 use raw::{ExpandedLine, InvoiceEntryType, Lines, PaymentEntryType};
-use rrule::RRule;
+use rrule::RRuleSet;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::iter::{self, Iterator};
@@ -30,38 +31,38 @@ pub struct Entry {
 
 #[derive(Debug, Clone)]
 enum Date {
-    SingleDate(NaiveDate),
-    RRule(Box<RRule>),
+    Single(NaiveDate),
+    Recurring(Box<RRuleSet>),
 }
 
 impl Date {
-    fn iter(&self) -> Box<dyn Iterator<Item = NaiveDate> + '_> {
+    // TODO impl IntoIterator
+    fn iter(self) -> Box<dyn Iterator<Item = NaiveDate> + Send> {
         match self {
-            Date::SingleDate(date) => Box::new(iter::once(*date)),
-            Date::RRule(rrule) => Box::new(rrule.into_iter().map(|d| d.date_naive())),
+            Date::Single(date) => Box::new(iter::once(date)),
+            Date::Recurring(recur) => Box::new(recur.clone().into_iter().map(|d| d.date_naive())),
         }
     }
 
     fn start(&self) -> NaiveDate {
         match self {
-            Date::SingleDate(date) => *date,
-            Date::RRule(rrule) => {
-                // RRule zones are all treated as utc
-                rrule.get_properties().dt_start.date_naive()
-            }
+            Date::Single(date) => *date,
+            Date::Recurring(recur) => recur.get_dt_start().date_naive(),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum Body {
-    // one Body::Journal may represent many JournalEntry as Entry.date is possibly RRule
+    // one Body::Journal may represent many JournalEntry as Entry.date is possibly recurring
     Journal(JournalLines),
     PaymentSent(Payment),
     PaymentReceived(Payment),
     PurchaseInvoice(Invoice),
     SaleInvoice(Invoice),
 }
+
+pub type JournalEntryIterator = Box<dyn Iterator<Item = Result<JournalEntry>> + Send>;
 
 impl Entry {
     pub fn id(&self) -> String {
@@ -74,7 +75,7 @@ impl Entry {
     }
 
     /// Returns iterator of entry dates up to and including `util`
-    pub fn dates(&self, until: NaiveDate) -> impl Iterator<Item = NaiveDate> + '_ {
+    pub fn dates(self, until: NaiveDate) -> impl Iterator<Item = NaiveDate> {
         self.date.iter().take_while(move |d| *d <= until)
     }
 
@@ -139,35 +140,38 @@ impl Entry {
     ) -> Result<Vec<JournalLine>> {
         let party = self.party();
         if let Some(party) = party {
-            let j_entries = self.to_journal_entries(until)?;
-            let party_lines = j_entries
-                .iter()
-                .flat_map(|j| {
-                    j.lines()
-                        .iter()
-                        .filter_map(|l| {
-                            if l.0 == account {
-                                Some(JournalLine(party.to_owned(), l.1))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
+            self.clone()
+                .into_journal_entries(until)
+                .map(|j| {
+                    j.map(|j| {
+                        j.lines()
+                            .iter()
+                            .filter_map(|l| {
+                                if l.0 == account {
+                                    Some(JournalLine(party.to_owned(), l.1))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    })
                 })
-                .collect();
-            Ok(party_lines)
+                .flatten_ok()
+                .collect()
         } else {
             Ok(Vec::default())
         }
     }
 
-    /// Get all journal entries of possibly recurring entry
-    // TODO why doesn't this return an iterator?
-    pub fn to_journal_entries(&self, until: Option<NaiveDate>) -> Result<Vec<JournalEntry>> {
+    /// Consume and transform possibly recurring entry into iterator of journal entries
+    pub fn into_journal_entries(self, until: Option<NaiveDate>) -> JournalEntryIterator {
         let until = until.unwrap_or(Local::now().date_naive());
-        self.dates(until)
-            .map(|date| self.to_journal_entry_for_date(date))
-            .collect::<Result<Vec<JournalEntry>>>()
+
+        Box::new(
+            self.clone()
+                .dates(until)
+                .map(move |date| self.to_journal_entry_for_date(date)),
+        )
     }
 
     pub fn to_journal_entry(&self) -> Result<JournalEntry> {
@@ -259,24 +263,24 @@ impl TryFrom<raw::Entry> for Entry {
             // id: raw_entry.id.clone().context("Id missing!")?,
             id: raw_entry.id().unwrap_or_default(),
 
-            // `date` is single date unless `repeat` is specified then becomes rrule
-            // rrule is parsed from optional `repeat` and `end` fields
-            // treating string 'monthly' as generic monthly rrule
+            // `date` is single date unless `repeat` is specified then becomes recurring
+            // Recurrence is parsed from optional `repeat` and `end` fields
+            // treating frequency strings like 'monthly' as simple rules
             // TODO handle this intrinsically when parsed as invoice
-            date: raw_entry.repeat().map_or::<Result<_>, _>(
-                Ok(Date::SingleDate(date)),
-                |rule_str| {
-                    let ed = match rule_str.to_uppercase().as_str() {
-                        // if simply MONTHLY use basic monthy rrule
-                        "MONTHLY" => RRule::new(end.map_or(default_monthly_rrule(date), |end| {
-                            default_monthly_rrule(date)
-                                .until(Utc.from_utc_datetime(&end.and_hms_opt(0, 0, 0).unwrap()))
-                        }))?,
-                        rule_str => rule_str.parse()?,
+            date: match raw_entry.repeat() {
+                Some(rule_str) => {
+                    // if rule string can be parsed as a simple frequency
+                    let rrule = if let Ok(freq) = rule_str.to_uppercase().parse() {
+                        simple_rrule(freq, date, end)?
+                    } else {
+                        rule_str
+                            .parse()
+                            .map_err(|_| anyhow!("Failed to parse rrule"))?
                     };
-                    Ok(Date::RRule(Box::new(ed)))
-                },
-            )?,
+                    Date::Recurring(Box::new(rrule))
+                }
+                None => Date::Single(date),
+            },
             memo: raw_entry.memo(),
             body: match raw_entry {
                 raw::Entry::PaymentEntry(raw_entry) => match raw_entry.r#type {
@@ -347,11 +351,11 @@ impl From<Entry> for raw::Entry {
             Body::Journal(lines) => {
                 let debits: HashMap<String, Money> = lines
                     .iter()
-                    .filter_map(|l| l.1.as_debit().map(|m| (l.0.clone(), m)))
+                    .filter_map(|l| l.1.as_abs_debit().map(|m| (l.0.clone(), m)))
                     .collect();
                 let credits: HashMap<String, Money> = lines
                     .iter()
-                    .filter_map(|l| l.1.as_credit().map(|m| (l.0.clone(), m)))
+                    .filter_map(|l| l.1.as_abs_credit().map(|m| (l.0.clone(), m)))
                     .collect();
 
                 // TODO check to see if this is a case where expanded lines should be used

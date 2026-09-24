@@ -27,7 +27,7 @@ impl FromStr for Type {
             "Asset" => Type::Asset,
             "Liability" => Type::Liability,
             "Equity" => Type::Equity,
-            _ => bail!("Invalid account type {}", s),
+            _ => bail!("Invalid account type {s}"),
         };
         Ok(t)
     }
@@ -46,7 +46,7 @@ impl Tag {
     pub fn new(tag: &str) -> Result<Self> {
         let limit = 32;
         if tag.len() > limit {
-            bail!("Tag is longer than {} characters: {}", limit, tag);
+            bail!("Tag is longer than {limit} characters: {tag}");
         }
         Ok(Self(tag.to_lowercase()))
     }

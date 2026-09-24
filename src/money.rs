@@ -1,4 +1,5 @@
 use anyhow::{Context, Error, Result};
+use itertools::Itertools;
 use rust_decimal::prelude::*;
 use schemars::{JsonSchema, json_schema};
 use serde::de::{self, Deserializer, Visitor};
@@ -46,12 +47,35 @@ impl Zero for Money {
     }
 }
 
+/// fmt decimal with commas lol
+fn dec_fmt(d: Decimal) -> String {
+    let s = d.to_string();
+    let parts = s.split_once('.').unwrap_or((&s, "00"));
+    // add commas every 3 digits from right on integer part
+    let mut s = parts
+        .0
+        .chars()
+        .rev()
+        .chunks(3)
+        .into_iter()
+        .map(|c| c.collect::<String>())
+        .collect::<Vec<_>>()
+        .join(",")
+        .chars()
+        .rev()
+        .collect::<String>();
+    s.push('.');
+    s.push_str(parts.1);
+    s
+}
+
 impl fmt::Display for Money {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.0.is_sign_negative() {
-            write!(f, "(${})", -self.0)
+            // let parts = (-self.0).to_string().split('.')
+            write!(f, "({})", dec_fmt(-self.0))
         } else {
-            write!(f, "${}", self.0)
+            write!(f, "{}", dec_fmt(self.0))
         }
     }
 }
@@ -60,7 +84,8 @@ impl FromStr for Money {
     type Err = Error; // TODO custom parse error?
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.replace(",", "").replace("$", "").parse()?))
+        let d = Decimal::from_str(&s.replace(",", "").replace("$", ""))?;
+        Ok(Self(d))
     }
 }
 
@@ -108,9 +133,9 @@ impl Serialize for Money {
     where
         S: Serializer,
     {
-        // TODO support other currencies
+        // TODO support currencies
         let m = self.0.to_string();
-        serializer.serialize_str(&format!("${m}"))
+        serializer.serialize_str(&m.to_string())
     }
 }
 
@@ -183,16 +208,16 @@ mod money_tests {
     fn money_from_f64() -> Result<()> {
         // less than 2 dp
         let m: Money = 1f64.try_into()?;
-        assert_eq!(m.to_string(), "$1.00");
+        assert_eq!(m.to_string(), "1.00");
         let m: Money = 1.1.try_into()?;
-        assert_eq!(m.to_string(), "$1.10");
+        assert_eq!(m.to_string(), "1.10");
 
         let m: Money = 1.11.try_into()?;
-        assert_eq!(m.to_string(), "$1.11");
+        assert_eq!(m.to_string(), "1.11");
 
         // more than 2 dp
         let m: Money = 1.111.try_into()?;
-        assert_eq!(m.to_string(), "$1.111");
+        assert_eq!(m.to_string(), "1.111");
 
         Ok(())
     }
@@ -200,7 +225,7 @@ mod money_tests {
     #[test]
     fn money_from_u64() -> Result<()> {
         let m: Money = 1u64.try_into()?;
-        assert_eq!(m.to_string(), "$1.00");
+        assert_eq!(m.to_string(), "1.00");
 
         Ok(())
     }
@@ -208,7 +233,7 @@ mod money_tests {
     #[test]
     fn test_add() -> Result<()> {
         let add = Money::try_from(100.00)? + Money::try_from(100.00)?;
-        assert_eq!(add.to_string(), "$200.00");
+        assert_eq!(add.to_string(), "200.00");
         Ok(())
     }
 
@@ -217,5 +242,14 @@ mod money_tests {
     #[allow(unused_must_use)]
     fn test_add_panic() {
         dbg!(Money::try_from(8e83).unwrap());
+    }
+
+    #[test]
+    fn to_string() -> Result<()> {
+        let s = Money::try_from(1_234_567.00)?.to_string();
+        assert_eq!(s, "1,234,567.00");
+        let s = Money::from_str("1000")?.to_string();
+        assert_eq!(s, "1,000.00");
+        Ok(())
     }
 }

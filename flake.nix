@@ -39,6 +39,7 @@
 
           packages = [
             bacon
+            cargo-insta
           ];
 
           RUST_BACKTRACE = 1;

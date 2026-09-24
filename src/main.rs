@@ -1,6 +1,7 @@
 // use accounts;
-use accounts::{chart_of_accounts::ChartOfAccounts, *};
+use accounts::{chart_of_accounts::ChartOfAccounts, entry::journal::BalanceType, *};
 use anyhow::Result;
+use async_std::{fs, stream::StreamExt};
 use bank_txs::BankTxs;
 use clap::{Arg, Command};
 use entry::{
@@ -9,9 +10,7 @@ use entry::{
     raw,
 };
 use futures::{future, stream::TryStreamExt};
-use itertools::Itertools;
 use schemars::schema_for;
-use std::fs;
 
 #[async_std::main]
 async fn main() -> Result<()> {
@@ -24,9 +23,17 @@ async fn main() -> Result<()> {
             Arg::new("entries")
                 .short('e')
                 .long("entries")
-                .help("Sets directory or file of entries or '-' for stdin ")
+                .help("Sets directory or file of entries or '-' for stdin")
                 .value_name("DIR")
                 .default_value("./")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::new("end")
+                .short('d')
+                .long("end")
+                .help("End date of current period")
+                .value_name("DATE")
                 .takes_value(true),
         )
         .subcommand(
@@ -65,6 +72,15 @@ async fn main() -> Result<()> {
                         .help("Account of ledger")
                         .value_name("ACCOUNT")
                         .required(true)
+                        .takes_value(true),
+                )
+                .arg(
+                    Arg::new("balance")
+                        .short('b')
+                        .long("balance")
+                        .help("Balance type for ledger")
+                        .value_name("BALANCE_TYPE")
+                        .possible_values(["credit", "debit"])
                         .takes_value(true),
                 ),
         )
@@ -147,16 +163,16 @@ async fn main() -> Result<()> {
         .get_matches();
 
     if let Some(entries_arg) = matches.value_of("entries") {
+        let end = matches.value_of("end").map(|end| end.parse()).transpose()?;
         let instance = if entries_arg == "-" {
-            Accounts::new(None)
+            Accounts::new(JournalSource::Stdin, end)
         } else {
-            Accounts::new(Some(entries_arg))
+            Accounts::new(JournalSource::Path(entries_arg.to_string()), end)
         };
         if let Some(journal) = matches.subcommand_matches("journal") {
             // TODO walk dir sorted and add check to assert date order and process this iteratively instead of collecting
-            // TODO solve the problem of emitting recurring entries in order
-            let account = journal.value_of("account");
-            let party = journal.value_of("party");
+            let account = journal.value_of("account").map(String::from);
+            let party = journal.value_of("party").map(String::from);
             let with_party = journal.is_present("with-party");
 
             let mut entries: Vec<JournalEntry> = instance
@@ -171,30 +187,17 @@ async fn main() -> Result<()> {
             })?;
         } else if let Some(ledger) = matches.subcommand_matches("ledger") {
             let account = ledger.value_of("account").unwrap();
+            let balance: Option<BalanceType> =
+                ledger.value_of("balance").map(|b| b.parse()).transpose()?;
 
-            let ledger_lines: Vec<LedgerLine> = instance.ledger(account).try_collect().await?;
-            // with running totals
-            ledger_lines
-                .iter()
-                .sorted_by_key(|l| l.date)
-                .scan(JournalAmount::default(), |acc, line| {
-                    *acc += line.amount;
-                    Some(LedgerLine {
-                        running_total: *acc,
-                        ..line.clone()
-                    })
-                })
-                .for_each(|line| {
-                    let amt_pad = 12;
-                    let date = line.date;
-                    let amt_string = line.amount.to_row_string(amt_pad);
-                    let total_string = line.running_total.to_row_string(amt_pad);
-                    let memo = line.memo.unwrap_or_default();
-                    println!("{date} | {amt_string} | {total_string} | {memo}");
-                });
+            instance
+                .ledger(account)
+                .render(balance, None, false)
+                .for_each(|line| println!("{line}"))
+                .await;
         } else if let Some(balances) = matches.subcommand_matches("balances") {
-            let party = balances.value_of("party");
-            let account = balances.value_of("account");
+            let party = balances.value_of("party").map(String::from);
+            let account = balances.value_of("account").map(String::from);
 
             let balances = instance.balances_filtered(account, party).await?;
             let total = balances
@@ -220,7 +223,7 @@ async fn main() -> Result<()> {
                 report.value_of("chart of accounts"),
             ) {
                 let chart = ChartOfAccounts::from_file(chart).await?;
-                let mut report = fs::read_to_string(spec)?.parse()?;
+                let mut report = fs::read_to_string(spec).await?.parse()?;
                 let report = instance.run_report(&chart, &mut report).await?;
                 println!("{report}")
             }
@@ -245,7 +248,7 @@ async fn main() -> Result<()> {
             let mut txs = BankTxs::from_files(txs_file, rules_file).await?;
 
             instance
-                .entries_filtered(Some(account), None)
+                .entries_filtered(Some(account.to_owned()), None)
                 .try_for_each(|entry: Entry| {
                     let matched = txs.match_and_rm(entry.clone());
                     if !matched.is_empty() {

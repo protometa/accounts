@@ -14,7 +14,10 @@ use std::convert::TryInto;
 /// Test that a dir containing one entry per file parses without error
 #[async_std::test]
 async fn test_basic_entries() -> Result<()> {
-    let instance = Accounts::new(Some("./tests/fixtures/entries_flat"));
+    let instance = Accounts::new(
+        JournalSource::Path("./tests/fixtures/entries_flat".to_string()),
+        None,
+    );
     let entries = instance.entries().try_collect::<Vec<Entry>>().await?;
     dbg!(&entries);
     let count = entries.iter().map(|entry| entry.id()).unique().count();
@@ -25,7 +28,10 @@ async fn test_basic_entries() -> Result<()> {
 /// Test that a dir containing nested dirs parses without error
 #[async_std::test]
 async fn test_nested_dirs() -> Result<()> {
-    let instance = Accounts::new(Some("./tests/fixtures/entries_nested_dirs"));
+    let instance = Accounts::new(
+        JournalSource::Path("./tests/fixtures/entries_nested_dirs".to_string()),
+        None,
+    );
     let entries = instance.entries().try_collect::<Vec<Entry>>().await?;
     dbg!(&entries);
     let count = entries.iter().map(|entry| entry.id()).unique().count();
@@ -36,9 +42,10 @@ async fn test_nested_dirs() -> Result<()> {
 /// Test that a dir with one file containing multiple entries parses without error
 #[async_std::test]
 async fn test_multiple_entries_in_one_file() -> Result<()> {
-    let instance = Accounts::new(Some(
-        "./tests/fixtures/entries_multiple_entries_in_one_file",
-    ));
+    let instance = Accounts::new(
+        JournalSource::Path("./tests/fixtures/entries_multiple_entries_in_one_file".to_string()),
+        None,
+    );
     let entries = instance.entries().try_collect::<Vec<Entry>>().await?;
     dbg!(&entries);
     let count = entries.iter().map(|entry| entry.id()).unique().count();
@@ -49,7 +56,10 @@ async fn test_multiple_entries_in_one_file() -> Result<()> {
 /// Test that journal entries from entries are correct
 #[async_std::test]
 async fn test_journal_from_entries() -> Result<()> {
-    let instance = Accounts::new(Some("./tests/fixtures/entries"));
+    let instance = Accounts::new(
+        JournalSource::Path("./tests/fixtures/entries".to_string()),
+        None,
+    );
 
     let journal_entries: Vec<JournalEntry> = instance.journal().try_collect().await?;
 
@@ -125,7 +135,51 @@ async fn test_journal_from_entries() -> Result<()> {
 /// Test ledger from entries
 #[async_std::test]
 async fn test_ledger() -> Result<()> {
-    let instance = Accounts::new(Some("./tests/fixtures/entries"));
+    let instance = Accounts::new(
+        JournalSource::Path("./tests/fixtures/entries".to_string()),
+        None,
+    );
+    let ledger_lines: Vec<LedgerLine> = instance.ledger("Business Checking").try_collect().await?;
+    // with running totals
+    let ledger_lines = ledger_lines
+        .iter()
+        .sorted_by_key(|l| l.date)
+        .scan(JournalAmount::default(), |acc, line| {
+            *acc += line.amount;
+            Some(LedgerLine {
+                running_total: *acc,
+                ..line.clone()
+            })
+        })
+        .collect::<Vec<LedgerLine>>();
+
+    assert_eq!(dbg!(&ledger_lines).iter().count(), 3);
+    Expect(&ledger_lines)
+        .contains(
+            "2020-01-03",
+            JournalAmount::credit(50.00)?,
+            JournalAmount::credit(50.00)?,
+        )
+        .contains(
+            "2020-01-06",
+            JournalAmount::debit(10.00)?,
+            JournalAmount::credit(40.00)?,
+        )
+        .contains(
+            "2020-01-07",
+            JournalAmount::debit(5.00)?,
+            JournalAmount::credit(35.00)?,
+        );
+    Ok(())
+}
+
+/// Test ledger cmd
+#[async_std::test]
+async fn test_ledger_cmd() -> Result<()> {
+    let instance = Accounts::new(
+        JournalSource::Path("./tests/fixtures/entries".to_string()),
+        None,
+    );
     let ledger_lines: Vec<LedgerLine> = instance.ledger("Business Checking").try_collect().await?;
     // with running totals
     let ledger_lines = ledger_lines
@@ -163,7 +217,10 @@ async fn test_ledger() -> Result<()> {
 /// Test balances from entries
 #[async_std::test]
 async fn test_balance() -> Result<()> {
-    let instance = Accounts::new(Some("./tests/fixtures/entries"));
+    let instance = Accounts::new(
+        JournalSource::Path("./tests/fixtures/entries".to_string()),
+        None,
+    );
     let balances = instance.balances().await?;
     assert_eq!(balances.len(), 6);
     Expect(&balances)
@@ -179,7 +236,10 @@ async fn test_balance() -> Result<()> {
 /// Test journal entries from recurring entries
 #[async_std::test]
 async fn test_recurring() -> Result<()> {
-    let instance = Accounts::new(Some("./tests/fixtures/entries_recurring"));
+    let instance = Accounts::new(
+        JournalSource::Path("./tests/fixtures/entries_recurring".to_string()),
+        None,
+    );
 
     let journal_entries: Vec<JournalEntry> = instance.journal().try_collect().await?;
 
@@ -278,7 +338,10 @@ async fn test_report() -> Result<()> {
 
 #[async_std::test]
 async fn test_run_report() -> Result<()> {
-    let instance = Accounts::new(Some("./tests/fixtures/entries"));
+    let instance = Accounts::new(
+        JournalSource::Path("./tests/fixtures/entries".to_string()),
+        None,
+    );
     let chart_of_accounts =
         ChartOfAccounts::from_file("./tests/fixtures/ChartOfAccounts.yaml").await?;
     let mut report = ReportNode::from_file("./tests/fixtures/IncomeStatement.yaml").await?;
