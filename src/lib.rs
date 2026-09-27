@@ -4,23 +4,22 @@ pub mod chart_of_accounts;
 pub mod entry;
 pub mod lines;
 pub mod money;
+pub mod render_table;
 pub mod report;
 
 use anyhow::{Error, Result};
 use chart_of_accounts::ChartOfAccounts;
 use chrono::NaiveDate;
-use comfy_table::*;
-use entry::journal::{BalanceType, JournalAccount, JournalAmount, JournalEntry, JournalLine};
+use entry::journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine};
 use entry::{Entry, JournalEntryIterator};
 use futures::future::{self, Future};
 use futures::stream::{self, BoxStream, TryStreamExt};
-use futures::{Stream, StreamExt, TryStream};
+use futures::{Stream, StreamExt};
 use lines::lines;
 use lines_ext::LinesExt;
 use money::Money;
 use report::ReportNode;
 use std::borrow::ToOwned;
-use std::cmp;
 use std::collections::HashMap;
 use std::iter::Peekable;
 use std::ops::AddAssign;
@@ -172,10 +171,7 @@ impl Accounts {
     }
 
     /// Convert own stream of `Entry`s into `JournalEntry`s
-    pub fn journal(
-        &self,
-    ) -> impl TryStream<Item = Result<JournalEntry>, Ok = JournalEntry, Error = anyhow::Error> + '_
-    {
+    pub fn journal(&self) -> BoxStream<Result<JournalEntry>> {
         self.journal_filtered(None, None)
     }
 
@@ -361,138 +357,10 @@ impl Accounts {
     }
 }
 
-enum TableRow<L> {
-    Header,
-    Body(L),
-    Footer,
-}
-
-const DATE_COL_WIDTH: u16 = 12;
-const MEMO_COL_WIDTH: u16 = 60;
-const MONEY_COL_WIDTH: u16 = 14;
-// the width of all static table content
-// momo column will be dynamic and wrap on small screens
-// (we can't use comfy_table dynamic width since it can't know the data ahead of time)
-const STATIC_WIDTH: u16 = DATE_COL_WIDTH + MONEY_COL_WIDTH * 3 + 6;
-const TABLE_WIDTH: u16 = STATIC_WIDTH + MEMO_COL_WIDTH;
-
-const LEDGER_HEADER_STYLE: TableStyle = TableStyle::new()
-    .top_border(LineStyle::new('╭', '─', '┬', '╮'))
-    .header_lines(ContentLineStyle::new('│', '│', '│'))
-    .header_separator(LineStyle::new('├', '─', '┼', '┤'))
-    .content_lines(ContentLineStyle::new('│', '│', '│'));
-
-const LEDGER_BODY_STYLE: TableStyle =
-    TableStyle::new().content_lines(ContentLineStyle::new('│', '│', '│'));
-
-const LEDGER_FOOTER_STYLE: TableStyle = TableStyle::new()
-    .content_lines(ContentLineStyle::new('│', ' ', '│'))
-    .bottom_border(LineStyle::new('╰', '─', '┴', '╯'));
-
-fn set_cols(t: &mut comfy_table::Table, width: u16) {
-    // this sets default max width
-    t.set_width(width);
-    // this tells us above or tty width
-    let width = t.width().unwrap_or_default();
-    let memo_col_dyn_width = cmp::min(width.saturating_sub(STATIC_WIDTH), MEMO_COL_WIDTH);
-    t.column_mut(0)
-        .unwrap()
-        .set_constraint(ColumnConstraint::Absolute(Width::Fixed(DATE_COL_WIDTH)));
-    t.column_mut(1)
-        .unwrap()
-        .set_constraint(ColumnConstraint::Absolute(Width::Fixed(memo_col_dyn_width)));
-    t.column_mut(2)
-        .unwrap()
-        .set_constraint(ColumnConstraint::Absolute(Width::Fixed(MONEY_COL_WIDTH)))
-        .set_cell_alignment(CellAlignment::Right);
-    t.column_mut(3)
-        .unwrap()
-        .set_constraint(ColumnConstraint::Absolute(Width::Fixed(MONEY_COL_WIDTH)))
-        .set_cell_alignment(CellAlignment::Right);
-    t.column_mut(4)
-        .unwrap()
-        .set_constraint(ColumnConstraint::Absolute(Width::Fixed(MONEY_COL_WIDTH)))
-        .set_cell_alignment(CellAlignment::Right);
-}
-
-pub trait RenderTable<'a> {
-    fn render(
-        self,
-        balance: Option<BalanceType>,
-        width: Option<u16>,
-        body_only: bool,
-    ) -> BoxStream<'a, String>;
-}
-
-impl<'a> RenderTable<'a> for BoxStream<'a, Result<LedgerLine>> {
-    fn render(
-        self,
-        balance: Option<BalanceType>,
-        width: Option<u16>,
-        body_only: bool,
-    ) -> BoxStream<'a, String> {
-        stream::once(async { TableRow::Header })
-            .chain(self.map(TableRow::Body))
-            .chain(stream::once(async { TableRow::Footer }))
-            .filter(move |row| {
-                future::ready(match row {
-                    TableRow::Body(_) => true,
-                    _ => !body_only,
-                })
-            })
-            .map(move |row| match row {
-                TableRow::Header => {
-                    let mut t = Table::new();
-                    t.load_style(LEDGER_HEADER_STYLE).set_header(
-                        ["Date", "Memo", "Debit", "Credit", "Balance"]
-                            .iter()
-                            .map(|h| Cell::new(h).add_attribute(Attribute::Bold)),
-                    );
-                    set_cols(&mut t, width.unwrap_or(TABLE_WIDTH));
-                    t.to_string()
-                }
-                TableRow::Body(row) => match row {
-                    Ok(row) => {
-                        let mut t = Table::new();
-                        t.load_style(LEDGER_BODY_STYLE).add_row([
-                            row.date.to_string(),
-                            row.memo.unwrap_or(String::default()),
-                            row.amount
-                                .as_abs_debit()
-                                .map(|m| m.to_string())
-                                .unwrap_or(String::default()),
-                            row.amount
-                                .as_abs_credit()
-                                .map(|m| m.to_string())
-                                .unwrap_or(String::default()),
-                            row.running_total
-                                .as_balance_type(balance.as_ref().unwrap_or(&BalanceType::Debit))
-                                .to_string(),
-                        ]);
-                        set_cols(&mut t, width.unwrap_or(TABLE_WIDTH));
-                        t.to_string()
-                    }
-                    _ => "ERROR".to_string(),
-                },
-                TableRow::Footer => {
-                    let mut t = Table::new();
-                    t.load_style(LEDGER_FOOTER_STYLE)
-                        .add_row((0..5).map(|_| ""));
-                    set_cols(&mut t, width.unwrap_or(TABLE_WIDTH));
-                    // rm empty row, keep only bottom border
-                    t.to_string().split_once('\n').unwrap().1.to_string()
-                }
-            })
-            .boxed()
-    }
-}
-
 #[cfg(test)]
 mod entry_tests {
     use super::*;
-
     use indoc::indoc;
-    use insta::assert_snapshot;
 
     const ENTRIES_STR: &str = indoc! {"
         ---
@@ -612,84 +480,6 @@ mod entry_tests {
                 .collect::<Vec<String>>(),
             vec!["2020-01-04"]
         );
-        Ok(())
-    }
-
-    #[async_std::test]
-    async fn ordered_recurring() -> Result<()> {
-        let instance = Accounts::new(
-            JournalSource::Str(
-                indoc! {"
-                ---
-                type: Purchase Invoice
-                date: 2020-01-02
-                memo: Weekly bill
-                party: ACME Business Services
-                account: Operating Expenses
-                amount: 10
-                repeat: weekly
-                ---
-                date: 2020-01-03
-                type: Payment Sent
-                party: ACME Business Services
-                memo: Payment
-                account: Checking
-                amount: 50
-                ---
-                type: Purchase Invoice
-                date: 2020-01-05
-                memo: Monthly bill
-                party: ACME Business Services
-                account: Operating Expenses
-                amount: 100
-                repeat: monthly
-                ---
-                date: 2020-02-04
-                type: Payment Sent
-                party: ACME Business Services
-                memo: Payment 
-                account: Checking
-                amount: 100
-                ---
-                date: 2020-03-06
-                type: Payment Sent
-                party: ACME Business Services
-                memo: Payment
-                account: Checking
-                amount: 100
-                "}
-                .to_string(),
-            ),
-            Some("2020-03-31".parse()?),
-        );
-        let entries = instance
-            .ledger("Accounts Payable")
-            .render(Some(BalanceType::Credit), Some(80), true)
-            .collect::<Vec<String>>()
-            .await
-            .join("\n");
-
-        assert_snapshot!(entries, @r"
-        │ 2020-01-02 │ Weekly bill        │              │        10.00 │        10.00 │
-        │ 2020-01-03 │ Payment            │        50.00 │              │      (40.00) │
-        │ 2020-01-05 │ Monthly bill       │              │       100.00 │        60.00 │
-        │ 2020-01-09 │ Weekly bill        │              │        10.00 │        70.00 │
-        │ 2020-01-16 │ Weekly bill        │              │        10.00 │        80.00 │
-        │ 2020-01-23 │ Weekly bill        │              │        10.00 │        90.00 │
-        │ 2020-01-30 │ Weekly bill        │              │        10.00 │       100.00 │
-        │ 2020-02-04 │ Payment            │       100.00 │              │         0.00 │
-        │ 2020-02-05 │ Monthly bill       │              │       100.00 │       100.00 │
-        │ 2020-02-06 │ Weekly bill        │              │        10.00 │       110.00 │
-        │ 2020-02-13 │ Weekly bill        │              │        10.00 │       120.00 │
-        │ 2020-02-20 │ Weekly bill        │              │        10.00 │       130.00 │
-        │ 2020-02-27 │ Weekly bill        │              │        10.00 │       140.00 │
-        │ 2020-03-05 │ Weekly bill        │              │        10.00 │       150.00 │
-        │ 2020-03-05 │ Monthly bill       │              │       100.00 │       250.00 │
-        │ 2020-03-06 │ Payment            │       100.00 │              │       150.00 │
-        │ 2020-03-12 │ Weekly bill        │              │        10.00 │       160.00 │
-        │ 2020-03-19 │ Weekly bill        │              │        10.00 │       170.00 │
-        │ 2020-03-26 │ Weekly bill        │              │        10.00 │       180.00 │
-        ");
         Ok(())
     }
 }

@@ -1,5 +1,10 @@
 // use accounts;
-use accounts::{chart_of_accounts::ChartOfAccounts, entry::journal::BalanceType, *};
+use accounts::{
+    chart_of_accounts::ChartOfAccounts,
+    entry::journal::BalanceType,
+    render_table::{RenderTable, RenderTableOpts},
+    *,
+};
 use anyhow::Result;
 use async_std::{fs, stream::StreamExt};
 use bank_txs::BankTxs;
@@ -173,18 +178,14 @@ async fn main() -> Result<()> {
             // TODO walk dir sorted and add check to assert date order and process this iteratively instead of collecting
             let account = journal.value_of("account").map(String::from);
             let party = journal.value_of("party").map(String::from);
-            let with_party = journal.is_present("with-party");
+            // TODO handle party with new render?
+            // let with_party = journal.is_present("with-party");
 
-            let mut entries: Vec<JournalEntry> = instance
+            instance
                 .journal_filtered(account, party)
-                .try_collect()
-                .await?;
-            entries.sort_by_key(|x| x.date());
-            entries.into_iter().try_for_each(|entry| {
-                let rows = entry.to_row_strings(with_party)?.join("\n");
-                println!("{rows}");
-                anyhow::Ok(())
-            })?;
+                .render(RenderTableOpts::default())
+                .for_each(|line| println!("{line}"))
+                .await;
         } else if let Some(ledger) = matches.subcommand_matches("ledger") {
             let account = ledger.value_of("account").unwrap();
             let balance: Option<BalanceType> =
@@ -192,7 +193,10 @@ async fn main() -> Result<()> {
 
             instance
                 .ledger(account)
-                .render(balance, None, false)
+                .render(RenderTableOpts {
+                    balance,
+                    ..Default::default()
+                })
                 .for_each(|line| println!("{line}"))
                 .await;
         } else if let Some(balances) = matches.subcommand_matches("balances") {

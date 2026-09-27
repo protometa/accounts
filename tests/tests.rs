@@ -2,11 +2,16 @@ use self::JournalAmountTest::*;
 use accounts::account::Type::*;
 use accounts::chart_of_accounts::ChartOfAccounts;
 use accounts::entry::Entry;
+use accounts::entry::journal::BalanceType;
+use accounts::render_table::{RenderTable, RenderTableOpts};
 use accounts::report::ReportNode;
 use accounts::*;
-use anyhow::Result;
+use anyhow::{Result, bail};
 use entry::journal::{JournalAccount, JournalAmount, JournalEntry};
+use futures::StreamExt;
 use futures::stream::TryStreamExt;
+use indoc::indoc;
+use insta::assert_snapshot;
 use itertools::Itertools;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -61,121 +66,94 @@ async fn test_journal_from_entries() -> Result<()> {
         None,
     );
 
-    let journal_entries: Vec<JournalEntry> = instance.journal().try_collect().await?;
+    let journal = instance
+        .journal()
+        .render(RenderTableOpts {
+            width: Some(80),
+            no_colors: true,
+            ..Default::default()
+        })
+        .collect::<Vec<String>>()
+        .await
+        .join("\n");
 
-    assert_eq!(dbg!(&journal_entries).iter().count(), 8);
-    Expect(&journal_entries)
-        .contains(
-            "2020-01-01",
-            "Operating Expenses",
-            JournalAmount::debit(100.00)?,
-        )
-        .contains(
-            "2020-01-01",
-            "Accounts Payable",
-            JournalAmount::credit(100.00)?,
-        )
-        .contains(
-            "2020-01-02",
-            "Accounts Payable",
-            JournalAmount::debit(100.00)?,
-        )
-        .contains("2020-01-02", "Credit Card", JournalAmount::credit(100.00)?)
-        .contains(
-            "2020-01-03",
-            "Operating Expenses",
-            JournalAmount::debit(50.00)?,
-        )
-        .contains(
-            "2020-01-03",
-            "Business Checking",
-            JournalAmount::credit(50.00)?,
-        )
-        .contains(
-            "2020-01-04",
-            "Operating Expenses",
-            JournalAmount::debit(100.00)?,
-        )
-        .contains(
-            "2020-01-04",
-            "Accounts Payable",
-            JournalAmount::credit(100.00)?,
-        )
-        .contains(
-            "2020-01-05",
-            "Accounts Receivable",
-            JournalAmount::debit(10.00)?,
-        )
-        .contains("2020-01-05", "Widget Sales", JournalAmount::credit(10.00)?)
-        .contains(
-            "2020-01-06",
-            "Business Checking",
-            JournalAmount::debit(10.00)?,
-        )
-        .contains(
-            "2020-01-06",
-            "Accounts Receivable",
-            JournalAmount::credit(10.00)?,
-        )
-        .contains(
-            "2020-01-07",
-            "Business Checking",
-            JournalAmount::debit(5.00)?,
-        )
-        .contains("2020-01-07", "Widget Sales", JournalAmount::credit(5.00)?)
-        .contains(
-            "2020-01-08",
-            "Accounts Receivable",
-            JournalAmount::debit(10.00)?,
-        )
-        .contains("2020-01-08", "Widget Sales", JournalAmount::credit(10.00)?);
+    // TODO automatically add memos for invoices that don't have them
+    assert_snapshot!(journal, @r"
+    ╭────────────┬───────────────────────────────────┬──────────────┬──────────────╮
+    │ Date       │ Particulars                       │       Debits │      Credits │
+    ├────────────┼───────────────────────────────────┼──────────────┼──────────────┤
+    │ 2020-01-01 │ Operating Expenses                │       100.00 │              │
+    │            │ Accounts Payable                  │              │       100.00 │
+    │                                                                              │
+    │ 2020-01-02 │ Accounts Payable                  │       100.00 │              │
+    │            │ Credit Card                       │              │       100.00 │
+    │              (Business Services)                                             │
+    │                                                                              │
+    │ 2020-01-03 │ Operating Expenses                │        50.00 │              │
+    │            │ Business Checking                 │              │        50.00 │
+    │                                                                              │
+    │ 2020-01-04 │ Operating Expenses                │       100.00 │              │
+    │            │ Accounts Payable                  │              │       100.00 │
+    │                                                                              │
+    │ 2020-01-05 │ Accounts Receivable               │        10.00 │              │
+    │            │ Widget Sales                      │              │        10.00 │
+    │                                                                              │
+    │ 2020-01-06 │ Business Checking                 │        10.00 │              │
+    │            │ Accounts Receivable               │              │        10.00 │
+    │              (Widget)                                                        │
+    │                                                                              │
+    │ 2020-01-07 │ Business Checking                 │         5.00 │              │
+    │            │ Widget Sales                      │              │         5.00 │
+    │                                                                              │
+    │ 2020-01-08 │ Accounts Receivable               │        10.00 │              │
+    │            │ Widget Sales                      │              │        10.00 │
+    ╰──────────────────────────────────────────────────────────────────────────────╯
+    ");
+    println!("{journal}");
+    Ok(())
+}
+
+/// Test that journal entries from entries are correct
+#[async_std::test]
+async fn journal_entry() -> Result<()> {
+    static JOURNAL: &str = indoc! {"
+        ---
+        date: 2020-01-01
+        memo: Initial Contribution
+        debits:
+          Bank: 15,000
+        credits:
+          Owner Contributions: 15,000
+    "};
+    let instance = Accounts::new(JournalSource::Str(JOURNAL.to_string()), None);
+
+    let journal = instance
+        .journal()
+        .render(RenderTableOpts {
+            width: Some(80),
+            no_colors: true,
+            ..Default::default()
+        })
+        .collect::<Vec<String>>()
+        .await
+        .join("\n");
+
+    assert_snapshot!(journal, @r"
+    ╭────────────┬───────────────────────────────────┬──────────────┬──────────────╮
+    │ Date       │ Particulars                       │       Debits │      Credits │
+    ├────────────┼───────────────────────────────────┼──────────────┼──────────────┤
+    │ 2020-01-01 │ Bank                              │    15,000.00 │              │
+    │            │ Owner Contributions               │              │    15,000.00 │
+    │              (Initial Contribution)                                          │
+    ╰──────────────────────────────────────────────────────────────────────────────╯
+    ");
+    println!("{journal}");
     Ok(())
 }
 
 /// Test ledger from entries
 #[async_std::test]
 async fn test_ledger() -> Result<()> {
-    let instance = Accounts::new(
-        JournalSource::Path("./tests/fixtures/entries".to_string()),
-        None,
-    );
-    let ledger_lines: Vec<LedgerLine> = instance.ledger("Business Checking").try_collect().await?;
-    // with running totals
-    let ledger_lines = ledger_lines
-        .iter()
-        .sorted_by_key(|l| l.date)
-        .scan(JournalAmount::default(), |acc, line| {
-            *acc += line.amount;
-            Some(LedgerLine {
-                running_total: *acc,
-                ..line.clone()
-            })
-        })
-        .collect::<Vec<LedgerLine>>();
-
-    assert_eq!(dbg!(&ledger_lines).iter().count(), 3);
-    Expect(&ledger_lines)
-        .contains(
-            "2020-01-03",
-            JournalAmount::credit(50.00)?,
-            JournalAmount::credit(50.00)?,
-        )
-        .contains(
-            "2020-01-06",
-            JournalAmount::debit(10.00)?,
-            JournalAmount::credit(40.00)?,
-        )
-        .contains(
-            "2020-01-07",
-            JournalAmount::debit(5.00)?,
-            JournalAmount::credit(35.00)?,
-        );
-    Ok(())
-}
-
-/// Test ledger cmd
-#[async_std::test]
-async fn test_ledger_cmd() -> Result<()> {
     let instance = Accounts::new(
         JournalSource::Path("./tests/fixtures/entries".to_string()),
         None,
@@ -293,6 +271,92 @@ async fn test_recurring() -> Result<()> {
             JournalAmount::debit(150.00)?,
         )
         .contains("2020-03-02", "Bank Account", JournalAmount::credit(150.00)?);
+    Ok(())
+}
+
+#[async_std::test]
+async fn ordered_recurring() -> Result<()> {
+    static JOURNAL: &str = indoc! {"
+        ---
+        type: Purchase Invoice
+        date: 2020-01-02
+        memo: Weekly bill
+        party: ACME Business Services
+        account: Operating Expenses
+        amount: 10
+        repeat: weekly
+        ---
+        date: 2020-01-03
+        type: Payment Sent
+        party: ACME Business Services
+        memo: Payment
+        account: Checking
+        amount: 50
+        ---
+        type: Purchase Invoice
+        date: 2020-01-05
+        memo: Monthly bill
+        party: ACME Business Services
+        account: Operating Expenses
+        amount: 100
+        repeat: monthly
+        ---
+        date: 2020-02-04
+        type: Payment Sent
+        party: ACME Business Services
+        memo: Payment 
+        account: Checking
+        amount: 100
+        ---
+        date: 2020-03-06
+        type: Payment Sent
+        party: ACME Business Services
+        memo: Payment
+        account: Checking
+        amount: 100
+    "};
+
+    let instance = Accounts::new(
+        JournalSource::Str(JOURNAL.to_string()),
+        Some("2020-03-31".parse()?),
+    );
+    let ledger = instance
+        .ledger("Accounts Payable")
+        .render(RenderTableOpts {
+            balance: Some(BalanceType::Credit),
+            width: Some(80),
+            no_colors: true,
+            ..Default::default()
+        })
+        .collect::<Vec<String>>()
+        .await
+        .join("\n");
+
+    assert_snapshot!(ledger, @r"
+        ╭────────────┬────────────────────┬──────────────┬──────────────┬──────────────╮
+        │ Date       │ Memo               │        Debit │       Credit │   Cr Balance │
+        ├────────────┼────────────────────┼──────────────┼──────────────┼──────────────┤
+        │ 2020-01-02 │ Weekly bill        │              │        10.00 │        10.00 │
+        │ 2020-01-03 │ Payment            │        50.00 │              │      (40.00) │
+        │ 2020-01-05 │ Monthly bill       │              │       100.00 │        60.00 │
+        │ 2020-01-09 │ Weekly bill        │              │        10.00 │        70.00 │
+        │ 2020-01-16 │ Weekly bill        │              │        10.00 │        80.00 │
+        │ 2020-01-23 │ Weekly bill        │              │        10.00 │        90.00 │
+        │ 2020-01-30 │ Weekly bill        │              │        10.00 │       100.00 │
+        │ 2020-02-04 │ Payment            │       100.00 │              │         0.00 │
+        │ 2020-02-05 │ Monthly bill       │              │       100.00 │       100.00 │
+        │ 2020-02-06 │ Weekly bill        │              │        10.00 │       110.00 │
+        │ 2020-02-13 │ Weekly bill        │              │        10.00 │       120.00 │
+        │ 2020-02-20 │ Weekly bill        │              │        10.00 │       130.00 │
+        │ 2020-02-27 │ Weekly bill        │              │        10.00 │       140.00 │
+        │ 2020-03-05 │ Weekly bill        │              │        10.00 │       150.00 │
+        │ 2020-03-05 │ Monthly bill       │              │       100.00 │       250.00 │
+        │ 2020-03-06 │ Payment            │       100.00 │              │       150.00 │
+        │ 2020-03-12 │ Weekly bill        │              │        10.00 │       160.00 │
+        │ 2020-03-19 │ Weekly bill        │              │        10.00 │       170.00 │
+        │ 2020-03-26 │ Weekly bill        │              │        10.00 │       180.00 │
+        ╰────────────┴────────────────────┴──────────────┴──────────────┴──────────────╯
+    ");
     Ok(())
 }
 
