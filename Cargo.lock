@@ -12,6 +12,7 @@ dependencies = [
  "chrono",
  "chrono-tz 0.6.3",
  "clap",
+ "colored_text",
  "comfy-table",
  "futures",
  "indoc",
@@ -441,6 +442,12 @@ checksum = "2850f2f5a82cbf437dd5af4d49848fbdfc27c157c3d010345776f952765261c5"
 dependencies = [
  "os_str_bytes",
 ]
+
+[[package]]
+name = "colored_text"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "745f8a64d62b40a725042e502af674abe0fb85726224780f1b2ff70552a4914c"
 
 [[package]]
 name = "comfy-table"

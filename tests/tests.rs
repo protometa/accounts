@@ -79,35 +79,25 @@ async fn test_journal_from_entries() -> Result<()> {
 
     // TODO automatically add memos for invoices that don't have them
     assert_snapshot!(journal, @r"
-    ╭────────────┬───────────────────────────────────┬──────────────┬──────────────╮
-    │ Date       │ Particulars                       │       Debits │      Credits │
-    ├────────────┼───────────────────────────────────┼──────────────┼──────────────┤
-    │ 2020-01-01 │ Operating Expenses                │       100.00 │              │
-    │            │ Accounts Payable                  │              │       100.00 │
-    │                                                                              │
-    │ 2020-01-02 │ Accounts Payable                  │       100.00 │              │
-    │            │ Credit Card                       │              │       100.00 │
-    │              (Business Services)                                             │
-    │                                                                              │
-    │ 2020-01-03 │ Operating Expenses                │        50.00 │              │
-    │            │ Business Checking                 │              │        50.00 │
-    │                                                                              │
-    │ 2020-01-04 │ Operating Expenses                │       100.00 │              │
-    │            │ Accounts Payable                  │              │       100.00 │
-    │                                                                              │
-    │ 2020-01-05 │ Accounts Receivable               │        10.00 │              │
-    │            │ Widget Sales                      │              │        10.00 │
-    │                                                                              │
-    │ 2020-01-06 │ Business Checking                 │        10.00 │              │
-    │            │ Accounts Receivable               │              │        10.00 │
-    │              (Widget)                                                        │
-    │                                                                              │
-    │ 2020-01-07 │ Business Checking                 │         5.00 │              │
-    │            │ Widget Sales                      │              │         5.00 │
-    │                                                                              │
-    │ 2020-01-08 │ Accounts Receivable               │        10.00 │              │
-    │            │ Widget Sales                      │              │        10.00 │
-    ╰──────────────────────────────────────────────────────────────────────────────╯
+    Date       │ Particulars                       │       Debits │      Credits  
+    2020-01-01 │ Operating Expenses                │       100.00 │               
+               │ Accounts Payable                  │              │       100.00  
+    2020-01-02 │ Accounts Payable                  │       100.00 │               
+               │ Credit Card                       │              │       100.00  
+               │ (Business Services)                                              
+    2020-01-03 │ Operating Expenses                │        50.00 │               
+               │ Business Checking                 │              │        50.00  
+    2020-01-04 │ Operating Expenses                │       100.00 │               
+               │ Accounts Payable                  │              │       100.00  
+    2020-01-05 │ Accounts Receivable               │        10.00 │               
+               │ Widget Sales                      │              │        10.00  
+    2020-01-06 │ Business Checking                 │        10.00 │               
+               │ Accounts Receivable               │              │        10.00  
+               │ (Widget)                                                         
+    2020-01-07 │ Business Checking                 │         5.00 │               
+               │ Widget Sales                      │              │         5.00  
+    2020-01-08 │ Accounts Receivable               │        10.00 │               
+               │ Widget Sales                      │              │        10.00
     ");
     println!("{journal}");
     Ok(())
@@ -132,6 +122,7 @@ async fn journal_entry() -> Result<()> {
         .render(RenderTableOpts {
             width: Some(80),
             no_colors: true,
+            body_only: true,
             ..Default::default()
         })
         .collect::<Vec<String>>()
@@ -139,13 +130,9 @@ async fn journal_entry() -> Result<()> {
         .join("\n");
 
     assert_snapshot!(journal, @r"
-    ╭────────────┬───────────────────────────────────┬──────────────┬──────────────╮
-    │ Date       │ Particulars                       │       Debits │      Credits │
-    ├────────────┼───────────────────────────────────┼──────────────┼──────────────┤
-    │ 2020-01-01 │ Bank                              │    15,000.00 │              │
-    │            │ Owner Contributions               │              │    15,000.00 │
-    │              (Initial Contribution)                                          │
-    ╰──────────────────────────────────────────────────────────────────────────────╯
+    2020-01-01 │ Bank                              │    15,000.00 │               
+               │ Owner Contributions               │              │    15,000.00  
+               │ (Initial Contribution)
     ");
     println!("{journal}");
     Ok(())
@@ -333,29 +320,26 @@ async fn ordered_recurring() -> Result<()> {
         .join("\n");
 
     assert_snapshot!(ledger, @r"
-        ╭────────────┬────────────────────┬──────────────┬──────────────┬──────────────╮
-        │ Date       │ Memo               │        Debit │       Credit │   Cr Balance │
-        ├────────────┼────────────────────┼──────────────┼──────────────┼──────────────┤
-        │ 2020-01-02 │ Weekly bill        │              │        10.00 │        10.00 │
-        │ 2020-01-03 │ Payment            │        50.00 │              │      (40.00) │
-        │ 2020-01-05 │ Monthly bill       │              │       100.00 │        60.00 │
-        │ 2020-01-09 │ Weekly bill        │              │        10.00 │        70.00 │
-        │ 2020-01-16 │ Weekly bill        │              │        10.00 │        80.00 │
-        │ 2020-01-23 │ Weekly bill        │              │        10.00 │        90.00 │
-        │ 2020-01-30 │ Weekly bill        │              │        10.00 │       100.00 │
-        │ 2020-02-04 │ Payment            │       100.00 │              │         0.00 │
-        │ 2020-02-05 │ Monthly bill       │              │       100.00 │       100.00 │
-        │ 2020-02-06 │ Weekly bill        │              │        10.00 │       110.00 │
-        │ 2020-02-13 │ Weekly bill        │              │        10.00 │       120.00 │
-        │ 2020-02-20 │ Weekly bill        │              │        10.00 │       130.00 │
-        │ 2020-02-27 │ Weekly bill        │              │        10.00 │       140.00 │
-        │ 2020-03-05 │ Weekly bill        │              │        10.00 │       150.00 │
-        │ 2020-03-05 │ Monthly bill       │              │       100.00 │       250.00 │
-        │ 2020-03-06 │ Payment            │       100.00 │              │       150.00 │
-        │ 2020-03-12 │ Weekly bill        │              │        10.00 │       160.00 │
-        │ 2020-03-19 │ Weekly bill        │              │        10.00 │       170.00 │
-        │ 2020-03-26 │ Weekly bill        │              │        10.00 │       180.00 │
-        ╰────────────┴────────────────────┴──────────────┴──────────────┴──────────────╯
+    Date       │ Memo               │        Debit │       Credit │   Cr Balance  
+    2020-01-02 │ Weekly bill        │              │        10.00 │        10.00  
+    2020-01-03 │ Payment            │        50.00 │              │      (40.00)  
+    2020-01-05 │ Monthly bill       │              │       100.00 │        60.00  
+    2020-01-09 │ Weekly bill        │              │        10.00 │        70.00  
+    2020-01-16 │ Weekly bill        │              │        10.00 │        80.00  
+    2020-01-23 │ Weekly bill        │              │        10.00 │        90.00  
+    2020-01-30 │ Weekly bill        │              │        10.00 │       100.00  
+    2020-02-04 │ Payment            │       100.00 │              │         0.00  
+    2020-02-05 │ Monthly bill       │              │       100.00 │       100.00  
+    2020-02-06 │ Weekly bill        │              │        10.00 │       110.00  
+    2020-02-13 │ Weekly bill        │              │        10.00 │       120.00  
+    2020-02-20 │ Weekly bill        │              │        10.00 │       130.00  
+    2020-02-27 │ Weekly bill        │              │        10.00 │       140.00  
+    2020-03-05 │ Weekly bill        │              │        10.00 │       150.00  
+    2020-03-05 │ Monthly bill       │              │       100.00 │       250.00  
+    2020-03-06 │ Payment            │       100.00 │              │       150.00  
+    2020-03-12 │ Weekly bill        │              │        10.00 │       160.00  
+    2020-03-19 │ Weekly bill        │              │        10.00 │       170.00  
+    2020-03-26 │ Weekly bill        │              │        10.00 │       180.00
     ");
     Ok(())
 }

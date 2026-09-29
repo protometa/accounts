@@ -1,11 +1,12 @@
 use crate::entry::journal::JournalEntry;
 use crate::{LedgerLine, entry::journal::BalanceType};
 use anyhow::Result;
+use colored_text::Colorize;
 use comfy_table::*;
 use futures::StreamExt;
 use futures::future::{self};
 use futures::stream::{self, BoxStream};
-use std::cmp;
+use itertools::Itertools;
 
 enum TableRow<T> {
     Header,
@@ -19,13 +20,24 @@ const MONEY_COL_WIDTH: u16 = 14;
 const TABLE_MIN_WIDTH: u16 = 80;
 
 static HEADER_STYLE: TableStyle = TableStyle::new()
-    .top_border(LineStyle::new('╭', '─', '┬', '╮'))
-    .header_lines(ContentLineStyle::new('│', '│', '│'))
-    .header_separator(LineStyle::new('├', '─', '┼', '┤'))
-    .content_lines(ContentLineStyle::new('│', '│', '│'));
+    .header_lines(ContentLineStyle::new(' ', '│', ' '))
+    .content_lines(ContentLineStyle::new(' ', '│', ' '));
 
 static BODY_STYLE: TableStyle =
-    TableStyle::new().content_lines(ContentLineStyle::new('│', '│', '│'));
+    TableStyle::new().content_lines(ContentLineStyle::new(' ', '│', ' '));
+
+// light theme
+// TODO allow toggle this
+// static FG_COLOR: &str = "000";
+// static BG_COLOR: &str = "fff";
+// static ALT_BG_COLOR: &str = "cee";
+// static HEADER_BG_COLOR: &str = "acc";
+
+// dark theme
+static FG_COLOR: &str = "bbb";
+static BG_COLOR: &str = "221";
+static ALT_BG_COLOR: &str = "332";
+static HEADER_BG_COLOR: &str = "554";
 
 #[derive(Default)]
 pub struct RenderTableOpts {
@@ -66,10 +78,6 @@ pub trait RenderTable<'a> {
     fn render(self, opts: RenderTableOpts) -> BoxStream<'a, String>;
 }
 
-static LEDGER_FOOTER_STYLE: TableStyle = TableStyle::new()
-    .content_lines(ContentLineStyle::new('│', ' ', '│'))
-    .bottom_border(LineStyle::new('╰', '─', '┴', '╯'));
-
 impl<'a> RenderTable<'a> for BoxStream<'a, Result<LedgerLine>> {
     fn render(
         self,
@@ -88,6 +96,7 @@ impl<'a> RenderTable<'a> for BoxStream<'a, Result<LedgerLine>> {
                 })
             })
             .filter_map(move |row| match row {
+                // comfy_table is used to render tables, but since the data is incrimental and comfy_table structure is limited, a table often represents a single row
                 TableRow::Header => {
                     let mut t = Table::new();
                     let drcr = match balance {
@@ -95,20 +104,21 @@ impl<'a> RenderTable<'a> for BoxStream<'a, Result<LedgerLine>> {
                         Some(BalanceType::Credit) => "Cr",
                         None => "??",
                     };
-                    let balance_header = format!("{drcr} Balance");
-                    let mut header = vec!["Date", "Memo", "Debit", "Credit"];
-                    header.push(&balance_header);
-                    let header = header.iter().map(|h| {
-                        let cell = Cell::new(h);
-                        if no_colors {
-                            cell
-                        } else {
-                            cell.add_attribute(Attribute::Bold)
-                        }
-                    });
-                    t.load_style(HEADER_STYLE).set_header(header);
+                    t.load_style(HEADER_STYLE).set_header([
+                        "Date",
+                        "Memo",
+                        "Debit",
+                        "Credit",
+                        format!("{drcr} Balance").as_str(),
+                    ]);
                     set_ledger_cols(&mut t, width);
-                    future::ready(Some(t.to_string()))
+                    // entire string rows are colored at once since comfy_table can only color individual cell content
+                    let colorized_row = if no_colors {
+                        t.to_string().clear()
+                    } else {
+                        t.to_string().hex(FG_COLOR).on_hex(HEADER_BG_COLOR).bold()
+                    };
+                    future::ready(Some(colorized_row.to_string()))
                 }
                 TableRow::Body(i, line) => match line {
                     Ok(line) => {
@@ -128,29 +138,20 @@ impl<'a> RenderTable<'a> for BoxStream<'a, Result<LedgerLine>> {
                                 .as_balance_type(balance.as_ref().unwrap_or(&BalanceType::Debit))
                                 .to_string(),
                         ];
-                        let row = row.iter().map(|h| {
-                            let cell = Cell::new(h);
-                            if !no_colors && i % 2 == 1 {
-                                // TODO alternating background colors might improve readability but not sure how to do that without full color themes
-                                cell.add_attribute(Attribute::Dim)
-                            } else {
-                                cell
-                            }
-                        });
                         t.load_style(BODY_STYLE).add_row(row);
                         set_ledger_cols(&mut t, width);
-                        future::ready(Some(t.to_string()))
+                        let colorized_row = if no_colors {
+                            t.to_string().clear()
+                        } else if i % 2 == 0 {
+                            t.to_string().hex(FG_COLOR).on_hex(BG_COLOR)
+                        } else {
+                            t.to_string().hex(FG_COLOR).on_hex(ALT_BG_COLOR)
+                        };
+                        future::ready(Some(colorized_row.to_string()))
                     }
                     _ => future::ready(Some("ERROR".to_string())),
                 },
-                TableRow::Footer => {
-                    let mut t = Table::new();
-                    t.load_style(LEDGER_FOOTER_STYLE)
-                        .add_row((0..5).map(|_| ""));
-                    set_ledger_cols(&mut t, width);
-                    // rm empty row, keep only bottom border
-                    future::ready(Some(t.to_string().split_once('\n').unwrap().1.to_string()))
-                }
+                TableRow::Footer => future::ready(None),
                 TableRow::InterBody => future::ready(None),
             })
             .boxed()
@@ -195,11 +196,7 @@ fn set_ledger_cols(t: &mut comfy_table::Table, width: Option<u16>) {
 }
 
 static JOURNAL_MEMO_STYLE: TableStyle =
-    TableStyle::new().content_lines(ContentLineStyle::new('│', ' ', '│'));
-
-static JOURNAL_FOOTER_STYLE: TableStyle = TableStyle::new()
-    .content_lines(ContentLineStyle::new('│', ' ', '│'))
-    .bottom_border(LineStyle::new('╰', '─', '─', '╯'));
+    TableStyle::new().content_lines(ContentLineStyle::new(' ', '│', ' '));
 
 impl<'a> RenderTable<'a> for BoxStream<'a, Result<JournalEntry>> {
     fn render(
@@ -221,21 +218,17 @@ impl<'a> RenderTable<'a> for BoxStream<'a, Result<JournalEntry>> {
             .filter_map(move |row| match row {
                 TableRow::Header => {
                     let mut t = Table::new();
-                    let header = ["Date", "Particulars", "Debits", "Credits"]
-                        .iter()
-                        .map(|h| {
-                            let cell = Cell::new(h);
-                            if no_colors {
-                                cell
-                            } else {
-                                cell.add_attribute(Attribute::Bold)
-                            }
-                        });
+                    let header = ["Date", "Particulars", "Debits", "Credits"];
                     t.load_style(HEADER_STYLE).set_header(header);
                     set_journal_cols(&mut t, width);
-                    future::ready(Some(t.to_string()))
+                    let colorized_row = if no_colors {
+                        t.to_string().clear()
+                    } else {
+                        t.to_string().hex(FG_COLOR).on_hex(HEADER_BG_COLOR).bold()
+                    };
+                    future::ready(Some(colorized_row.to_string()))
                 }
-                TableRow::Body(_, journal_entry) => match journal_entry {
+                TableRow::Body(i, journal_entry) => match journal_entry {
                     Ok(journal_entry) => {
                         let mut lines_table = Table::new();
                         lines_table.load_style(BODY_STYLE);
@@ -272,45 +265,37 @@ impl<'a> RenderTable<'a> for BoxStream<'a, Result<JournalEntry>> {
                         });
                         set_journal_cols(&mut lines_table, width);
 
-                        let mut memo_table = Table::new();
+                        let mut table_str = lines_table.to_string();
 
-                        if journal_entry.memo().is_some() {
-                            let mut memo_cell = Cell::new(format!(
-                                "({})",
-                                journal_entry.memo().unwrap_or(String::default())
-                            ));
-                            if !no_colors {
-                                memo_cell = memo_cell.add_attribute(Attribute::Dim);
-                            }
-
-                            memo_table.add_row([Cell::new(""), memo_cell]);
-                            memo_table.load_style(JOURNAL_MEMO_STYLE);
+                        if let Some(memo) = journal_entry.memo() {
+                            let mut memo_table = Table::new();
+                            memo_table
+                                .load_style(JOURNAL_MEMO_STYLE)
+                                .add_row(["", format!("({memo})").as_str()]);
                             set_journal_memo_cols(&mut memo_table, width);
-
-                            future::ready(Some(
-                                [lines_table.to_string(), memo_table.to_string()].join("\n"),
-                            ))
-                        } else {
-                            future::ready(Some(lines_table.to_string()))
+                            table_str.push('\n');
+                            table_str.push_str(memo_table.to_string().as_str());
                         }
+
+                        if !no_colors {
+                            table_str = table_str
+                                .split("\n")
+                                .map(|row| {
+                                    if i % 2 == 0 {
+                                        row.hex(FG_COLOR).on_hex(BG_COLOR).to_string()
+                                    } else {
+                                        row.hex(FG_COLOR).on_hex(ALT_BG_COLOR).to_string()
+                                    }
+                                })
+                                .join("\n");
+                        }
+
+                        future::ready(Some(table_str))
                     }
                     _ => future::ready(Some("ERROR".to_string())),
                 },
-                TableRow::InterBody => {
-                    let mut t = Table::new();
-                    t.load_style(JOURNAL_MEMO_STYLE);
-                    t.add_row(["", ""]);
-                    set_journal_memo_cols(&mut t, width);
-                    future::ready(Some(t.to_string()))
-                }
-                TableRow::Footer => {
-                    let mut t = Table::new();
-                    t.load_style(JOURNAL_FOOTER_STYLE)
-                        .add_row((0..2).map(|_| ""));
-                    set_journal_memo_cols(&mut t, width);
-                    // rm empty row, keep only bottom border
-                    future::ready(Some(t.to_string().split_once('\n').unwrap().1.to_string()))
-                }
+                TableRow::InterBody => future::ready(None),
+                TableRow::Footer => future::ready(None),
             })
             .boxed()
     }

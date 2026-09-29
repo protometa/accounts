@@ -47,6 +47,7 @@ impl Zero for Money {
     }
 }
 
+// TODO leave off cents when string is large or number reaches millions, maybe also use another unit when in billions
 /// fmt decimal with commas lol
 fn dec_fmt(d: Decimal) -> String {
     let s = d.to_string();

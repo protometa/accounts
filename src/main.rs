@@ -20,6 +20,7 @@ async fn main() -> Result<()> {
         .author("Luke Nimtz <luke.nimtz@gmail.com>")
         .about("Simple accounting tools")
         // .license("MIT OR Apache-2.0")
+        // TODO include arg to force colors
         .arg(
             Arg::new("entries")
                 .short('e')
