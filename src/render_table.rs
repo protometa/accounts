@@ -1,11 +1,9 @@
-use crate::entry::JournalEntryIterator;
 use crate::entry::journal::JournalEntry;
 use crate::{LedgerLine, entry::journal::BalanceType};
-use anyhow::{Error, Result};
-use clap::ArgMatches;
+use anyhow::Result;
 use comfy_table::*;
 use futures::StreamExt;
-use futures::future::{self, Future};
+use futures::future::{self};
 use futures::stream::{self, BoxStream};
 use std::cmp;
 
@@ -18,6 +16,7 @@ enum TableRow<T> {
 
 const DATE_COL_WIDTH: u16 = 12;
 const MONEY_COL_WIDTH: u16 = 14;
+const TABLE_MIN_WIDTH: u16 = 80;
 
 static HEADER_STYLE: TableStyle = TableStyle::new()
     .top_border(LineStyle::new('╭', '─', '┬', '╮'))
@@ -111,10 +110,10 @@ impl<'a> RenderTable<'a> for BoxStream<'a, Result<LedgerLine>> {
                     set_ledger_cols(&mut t, width);
                     future::ready(Some(t.to_string()))
                 }
-                TableRow::Body(_i, line) => match line {
+                TableRow::Body(i, line) => match line {
                     Ok(line) => {
                         let mut t = Table::new();
-                        t.load_style(BODY_STYLE).add_row([
+                        let row = [
                             line.date.to_string(),
                             line.memo.unwrap_or(String::default()),
                             line.amount
@@ -128,7 +127,17 @@ impl<'a> RenderTable<'a> for BoxStream<'a, Result<LedgerLine>> {
                             line.running_total
                                 .as_balance_type(balance.as_ref().unwrap_or(&BalanceType::Debit))
                                 .to_string(),
-                        ]);
+                        ];
+                        let row = row.iter().map(|h| {
+                            let cell = Cell::new(h);
+                            if !no_colors && i % 2 == 1 {
+                                // TODO alternating background colors might improve readability but not sure how to do that without full color themes
+                                cell.add_attribute(Attribute::Dim)
+                            } else {
+                                cell
+                            }
+                        });
+                        t.load_style(BODY_STYLE).add_row(row);
                         set_ledger_cols(&mut t, width);
                         future::ready(Some(t.to_string()))
                     }
@@ -159,7 +168,10 @@ fn set_ledger_cols(t: &mut comfy_table::Table, width: Option<u16>) {
         t.set_width(w);
     }
     // this tells us above or tty width
-    let width = cmp::min(t.width().unwrap_or_default(), LEDGER_TABLE_WIDTH);
+    let width = t
+        .width()
+        .unwrap_or(LEDGER_TABLE_WIDTH)
+        .clamp(TABLE_MIN_WIDTH, LEDGER_TABLE_WIDTH);
     // println!("{width}");
     let memo_col_dyn_width = width.saturating_sub(LEDGER_STATIC_WIDTH);
     t.column_mut(0)
@@ -268,7 +280,7 @@ impl<'a> RenderTable<'a> for BoxStream<'a, Result<JournalEntry>> {
                                 journal_entry.memo().unwrap_or(String::default())
                             ));
                             if !no_colors {
-                                memo_cell = memo_cell.add_attribute(Attribute::Bold);
+                                memo_cell = memo_cell.add_attribute(Attribute::Dim);
                             }
 
                             memo_table.add_row([Cell::new(""), memo_cell]);
@@ -305,14 +317,17 @@ impl<'a> RenderTable<'a> for BoxStream<'a, Result<JournalEntry>> {
 }
 
 const JOURNAL_STATIC_WIDTH: u16 = DATE_COL_WIDTH + MONEY_COL_WIDTH * 2 + 5;
-const JOURNAL_TABLE_WIDTH: u16 = 120;
+const JOURNAL_TABLE_WIDTH: u16 = 105;
 
 fn set_journal_cols(t: &mut comfy_table::Table, width: Option<u16>) {
     if let Some(w) = width {
         t.set_width(w);
     }
     // this tells us above or tty width
-    let width = cmp::min(t.width().unwrap_or_default(), JOURNAL_TABLE_WIDTH);
+    let width = t
+        .width()
+        .unwrap_or(JOURNAL_TABLE_WIDTH)
+        .clamp(TABLE_MIN_WIDTH, JOURNAL_TABLE_WIDTH);
     let memo_col_dyn_width = width.saturating_sub(JOURNAL_STATIC_WIDTH);
     t.column_mut(0)
         .unwrap()
@@ -337,7 +352,10 @@ fn set_journal_memo_cols(t: &mut comfy_table::Table, width: Option<u16>) {
         t.set_width(w);
     }
     // this tells us above or tty width
-    let width = cmp::min(t.width().unwrap_or_default(), JOURNAL_TABLE_WIDTH);
+    let width = t
+        .width()
+        .unwrap_or(JOURNAL_TABLE_WIDTH)
+        .clamp(TABLE_MIN_WIDTH, JOURNAL_TABLE_WIDTH);
     let memo_col_dyn_width = width.saturating_sub(JOURNAL_MEMO_STATIC_WIDTH);
     t.column_mut(0)
         .unwrap()

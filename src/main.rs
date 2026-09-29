@@ -9,11 +9,7 @@ use anyhow::Result;
 use async_std::{fs, stream::StreamExt};
 use bank_txs::BankTxs;
 use clap::{Arg, Command};
-use entry::{
-    Entry,
-    journal::{JournalAmount, JournalEntry},
-    raw,
-};
+use entry::{Entry, journal::JournalAmount, raw};
 use futures::{future, stream::TryStreamExt};
 use schemars::schema_for;
 
