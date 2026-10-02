@@ -1,15 +1,15 @@
 // use accounts;
 use accounts::{
+    account::BalanceType,
     chart_of_accounts::ChartOfAccounts,
-    entry::journal::BalanceType,
-    render_table::{RenderTable, RenderTableOpts},
+    render_table::{RenderStreamTable, RenderTable, RenderTableOpts},
     *,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_std::{fs, stream::StreamExt};
 use bank_txs::BankTxs;
-use clap::{Arg, Command};
-use entry::{Entry, journal::JournalAmount, raw};
+use clap::{Arg, ArgGroup, Command};
+use entry::{Entry, raw};
 use futures::{future, stream::TryStreamExt};
 use schemars::schema_for;
 
@@ -36,6 +36,14 @@ async fn main() -> Result<()> {
                 .long("end")
                 .help("End date of current period")
                 .value_name("DATE")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::new("chart")
+                .short('c')
+                .long("chart")
+                .help("Chart of accounts")
+                .value_name("FILE")
                 .takes_value(true),
         )
         .subcommand(
@@ -104,7 +112,20 @@ async fn main() -> Result<()> {
                         .help("Party filter")
                         .value_name("PARTY")
                         .takes_value(true),
-                ),
+                )
+                .arg(
+                    Arg::new("real")
+                        .long("real")
+                        .help("Filter only real (permanent) accounts")
+                        .group("permanence"),
+                )
+                .arg(
+                    Arg::new("nominal")
+                        .long("nominal")
+                        .help("Filter only nominal (temporary) accounts")
+                        .group("permanence"),
+                )
+                .group(ArgGroup::new("permanence")),
         )
         .subcommand(
             Command::new("report")
@@ -166,16 +187,20 @@ async fn main() -> Result<()> {
 
     if let Some(entries_arg) = matches.value_of("entries") {
         let end = matches.value_of("end").map(|end| end.parse()).transpose()?;
+        let chart = matches
+            .value_of("chart")
+            .map(|p| DocSource::Path(p.to_owned()));
         let instance = if entries_arg == "-" {
-            Accounts::new(JournalSource::Stdin, end)
+            Accounts::new(DocSource::Stdin, end, chart).await?
         } else {
-            Accounts::new(JournalSource::Path(entries_arg.to_string()), end)
+            Accounts::new(DocSource::Path(entries_arg.to_string()), end, chart).await?
         };
         if let Some(journal) = matches.subcommand_matches("journal") {
             // TODO walk dir sorted and add check to assert date order and process this iteratively instead of collecting
+            // TODO allow entries to be specified multiple times and merge each source in order
             let account = journal.value_of("account").map(String::from);
             let party = journal.value_of("party").map(String::from);
-            // TODO handle party with new render?
+            // TODO handle party with render?
             // let with_party = journal.is_present("with-party");
 
             instance
@@ -185,13 +210,21 @@ async fn main() -> Result<()> {
                 .await;
         } else if let Some(ledger) = matches.subcommand_matches("ledger") {
             let account = ledger.value_of("account").unwrap();
-            let balance: Option<BalanceType> =
-                ledger.value_of("balance").map(|b| b.parse()).transpose()?;
+            let balance = ledger
+                .value_of("balance")
+                .map(|b| b.parse::<BalanceType>())
+                .transpose()?;
+
+            let balance = balance
+                .or_else(|| instance.account(account).map(|a| a.normal_balance()))
+                .context(
+                    "Balance type not provided and cannot be determined from Chart of Accounts",
+                )?;
 
             instance
                 .ledger(account)
                 .render(RenderTableOpts {
-                    balance,
+                    balance: Some(balance),
                     ..Default::default()
                 })
                 .for_each(|line| println!("{line}"))
@@ -199,25 +232,22 @@ async fn main() -> Result<()> {
         } else if let Some(balances) = matches.subcommand_matches("balances") {
             let party = balances.value_of("party").map(String::from);
             let account = balances.value_of("account").map(String::from);
+            let is_real = if balances.is_present("real") {
+                Some(true)
+            } else if balances.is_present("nominal") {
+                Some(false)
+            } else {
+                None
+            };
 
-            let balances = instance.balances_filtered(account, party).await?;
-            let total = balances
-                .iter()
-                .fold(JournalAmount::default(), |mut acc, amount| {
-                    acc += *amount.1;
-                    acc
+            let table = instance
+                .balances_filtered(account, party, is_real)
+                .await?
+                .render(RenderTableOpts {
+                    ..Default::default()
                 });
-            let acc_pad = 32;
-            let amt_pad = 12;
-            balances.iter().for_each(|(account, amount)| {
-                let amt_string = amount.to_row_string(amt_pad);
-                println!("{account:acc_pad$} | {amt_string}");
-            });
-            // if accounts do not balance, show difference as error
-            if total != JournalAmount::default() {
-                let total_string = total.to_row_string(amt_pad);
-                println!("{:acc_pad$} | {total_string}", "ERROR");
-            }
+
+            println!("{table}");
         } else if let Some(report) = matches.subcommand_matches("report") {
             if let (Some(spec), Some(chart)) = (
                 report.value_of("report spec"),
@@ -232,14 +262,14 @@ async fn main() -> Result<()> {
             let payables = instance.payable().await?;
             let mut payables: Vec<_> = payables.iter().collect();
             payables.sort_by_key(|x| x.0);
-            payables.iter().for_each(|(account, amount)| {
+            payables.iter().for_each(|(account, (amount, _))| {
                 println!("{:32} | {}", account, amount.to_row_string(12));
             });
         } else if matches.subcommand_matches("receivable").is_some() {
             let receivables = instance.receivable().await?;
             let mut receivables: Vec<_> = receivables.iter().collect();
             receivables.sort_by_key(|x| x.0);
-            receivables.iter().for_each(|(account, amount)| {
+            receivables.iter().for_each(|(account, (amount, _))| {
                 println!("{:32} | {}", account, amount.to_row_string(12));
             });
         } else if let Some(reconcile) = matches.subcommand_matches("reconcile") {

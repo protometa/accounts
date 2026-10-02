@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct Account {
     pub name: String,
     pub description: Option<String>,
-    pub r#type: String,
+    pub class: String,
+    pub num: Option<usize>,
     pub tags: Option<Vec<String>>,
 }

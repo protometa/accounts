@@ -1,34 +1,17 @@
 #![allow(clippy::new_without_default)]
 
 use self::JournalAmount::*;
+use crate::account::BalanceType;
 use crate::money::Money;
-use anyhow::{Error, Result, anyhow, bail};
+use anyhow::{Error, Result, bail};
 use chrono::NaiveDate;
 use num_traits::Zero;
 use std::cmp::Ordering;
 use std::convert::TryInto;
 use std::fmt;
 use std::ops::{AddAssign, Deref};
-use std::str::FromStr;
 
 pub type JournalAccount = String;
-
-pub enum BalanceType {
-    Debit,
-    Credit,
-}
-
-impl FromStr for BalanceType {
-    type Err = Error; // TODO custom parse error?
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "debit" => Ok(BalanceType::Debit),
-            "credit" => Ok(BalanceType::Credit),
-            _ => Err(anyhow!("Balance type \"{s}\" not recognized")),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum JournalAmount {

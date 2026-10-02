@@ -1,42 +1,54 @@
 mod raw;
 
-use self::Sign::*;
-use self::Type::*;
-use anyhow::{Context, Error, Result, bail};
+use self::BalanceType::*;
+use self::Class::*;
+use anyhow::{Context, Error, Result, anyhow, bail};
 use std::{
     convert::{TryFrom, TryInto},
     str::FromStr,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum Type {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum Class {
     Asset,
     Liability,
-    Expense,
-    Revenue,
     #[default]
     Equity,
+    Revenue,
+    Expense,
 }
 
-impl FromStr for Type {
+impl FromStr for Class {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let t = match s {
-            "Expense" => Type::Expense,
-            "Revenue" => Type::Revenue,
-            "Asset" => Type::Asset,
-            "Liability" => Type::Liability,
-            "Equity" => Type::Equity,
-            _ => bail!("Invalid account type {s}"),
+            "Asset" => Class::Asset,
+            "Liability" => Class::Liability,
+            "Equity" => Class::Equity,
+            "Revenue" => Class::Revenue,
+            "Expense" => Class::Expense,
+            _ => bail!("Invalid account class: {s}"),
         };
         Ok(t)
     }
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum Sign {
+pub enum BalanceType {
     Debit,
     Credit,
+}
+
+impl FromStr for BalanceType {
+    type Err = Error; // TODO custom parse error?
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "debit" => Ok(BalanceType::Debit),
+            "credit" => Ok(BalanceType::Credit),
+            _ => Err(anyhow!("Balance type \"{s}\" not recognized")),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,31 +71,35 @@ macro_rules! tags {
     };
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Account {
-    pub acc_type: Type,
+    pub class: Class,
     pub name: String,
     pub tags: Vec<Tag>,
+    pub num: Option<usize>, // unique identifier, used for ordering if present
+    pub index: Option<usize>, // position in chart of accounts, used for ordering along with class if num is not specified
 }
 
 impl Account {
-    pub fn new(acc_type: Type, name: &str, tags: Vec<Tag>) -> Self {
+    pub fn new(class: Class, name: &str, num: Option<usize>, tags: Vec<Tag>) -> Self {
         Account {
             name: name.to_owned(),
-            acc_type,
+            class,
             tags,
+            num,
+            index: None,
         }
     }
 
-    pub fn sign(&self) -> Sign {
-        match self.acc_type {
+    pub fn normal_balance(&self) -> BalanceType {
+        match self.class {
             Asset | Expense => Debit,
             Liability | Revenue | Equity => Credit,
         }
     }
 
     pub fn is_debit(&self) -> bool {
-        match self.sign() {
+        match self.normal_balance() {
             Debit => true,
             Credit => false,
         }
@@ -91,6 +107,13 @@ impl Account {
 
     pub fn is_credit(&self) -> bool {
         !self.is_debit()
+    }
+
+    pub fn is_real(&self) -> bool {
+        match self.class {
+            Asset | Liability | Equity => true,
+            Revenue | Expense => false,
+        }
     }
 
     pub fn has_tag(&self, tag: &Tag) -> bool {
@@ -102,15 +125,17 @@ impl TryFrom<raw::Account> for Account {
     type Error = Error;
 
     fn try_from(raw_account: raw::Account) -> Result<Self> {
-        let acc_type = raw_account.r#type.parse()?;
+        let class = raw_account.class.parse()?;
         let tags = raw_account.tags.map_or_else(
             || Ok(Vec::new()),
             |tags| tags.iter().map(|t| Tag::new(t)).collect(),
         )?;
         Ok(Account {
-            acc_type,
+            class,
             name: raw_account.name,
             tags,
+            num: raw_account.num,
+            index: None,
         })
     }
 }

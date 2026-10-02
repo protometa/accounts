@@ -1,4 +1,11 @@
 ---
+date: 2020-01-01
+memo: Opening entry
+debits:
+  Business Checking: 1,000
+credits:
+  Capital: 1,000
+---
 # purchase invoice with payment later
 type: Purchase Invoice
 date: 2020-01-01
@@ -6,14 +13,14 @@ party: ACME Business Services
 account: Operating Expenses
 items:
   - description: Business Services
-    amount: 100
+    amount: 10
 ---
 type: Payment Sent
 date: 2020-01-02
 party: ACME Business Services 
 memo: Business Services
 account: Credit Card
-amount: 100
+amount: 10
 ---
 # purchase invoice with attached payment
 type: Purchase Invoice
@@ -34,7 +41,7 @@ party: ACME Business Services
 account: Operating Expenses
 items:
   - description: Business Services
-    amount: 100
+    amount: 50
 ---
 # sales invoice with payment later
 type: Sales Invoice
@@ -43,14 +50,14 @@ party: John Smith
 account: Widget Sales
 items:
   - description: Widget
-    amount: 10
+    amount: 100
 ---
 type: Payment Received
 date: 2020-01-06
 party: John Smith
 memo: Widget
 account: Business Checking
-amount: 10
+amount: 100
 ---
 # sales invoice with attached payment
 type: Sales Invoice
@@ -59,10 +66,10 @@ party: John Smith
 account: Widget Sales
 items:
   - description: Widget
-    amount: 5
+    amount: 30
 payment:
   account: Business Checking
-  amount: 5
+  amount: 30
 ---
 # sales invoice without payment
 type: Sales Invoice

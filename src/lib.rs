@@ -7,14 +7,17 @@ pub mod money;
 pub mod render_table;
 pub mod report;
 
-use anyhow::{Error, Result};
+use account::Account;
+use anyhow::{Context, Error, Result};
 use chart_of_accounts::ChartOfAccounts;
 use chrono::NaiveDate;
 use entry::journal::{JournalAccount, JournalAmount, JournalEntry, JournalLine};
 use entry::{Entry, JournalEntryIterator};
+use futures::future::OptionFuture;
 use futures::future::{self, Future};
 use futures::stream::{self, BoxStream, TryStreamExt};
 use futures::{Stream, StreamExt};
+use itertools::Itertools;
 use lines::lines;
 use lines_ext::LinesExt;
 use money::Money;
@@ -25,18 +28,21 @@ use std::iter::Peekable;
 use std::ops::AddAssign;
 
 #[derive(Debug, Clone)]
-pub enum JournalSource {
+pub enum DocSource {
     Stdin,
     Path(String),
     Str(String),
 }
 
 pub struct Accounts {
-    journal: JournalSource,
+    journal: DocSource,
     end: Option<NaiveDate>,
+    chart: Option<ChartOfAccounts>,
 }
 
-type Balances = HashMap<JournalAccount, JournalAmount>;
+// Simple balances of account names to amounts with possible full account metadata
+// TODO perhaps add balance as field on account and just make this a list
+type Balances = HashMap<JournalAccount, (JournalAmount, Option<Account>)>;
 
 pub fn entries_from_lines<'a>(
     lines_stream: impl Stream<Item = Result<String, std::io::Error>> + Send + 'a,
@@ -118,10 +124,10 @@ fn balances_from_journal_lines(
         HashMap::new(),
         async |mut acc, JournalLine(account, amount)| {
             acc.entry(account.clone())
-                .and_modify(|total: &mut JournalAmount| {
+                .and_modify(|(total, _): &mut (JournalAmount, _)| {
                     total.add_assign(amount);
                 })
-                .or_insert(amount);
+                .or_insert((amount, None));
             Ok(acc)
         },
     )
@@ -136,13 +142,36 @@ pub struct LedgerLine {
 }
 
 impl Accounts {
-    pub fn new(journal: JournalSource, end: Option<NaiveDate>) -> Self {
-        Accounts { journal, end }
+    pub async fn new(
+        journal: DocSource,
+        end: Option<NaiveDate>,
+        chart: Option<DocSource>,
+    ) -> Result<Self> {
+        let chart: OptionFuture<_> = chart
+            .map(async |chart| match chart {
+                DocSource::Path(file) => ChartOfAccounts::from_file(&file).await,
+                DocSource::Str(s) => ChartOfAccounts::from_str(&s).await,
+                DocSource::Stdin => unimplemented!(),
+            })
+            .into();
+        Ok(Accounts {
+            journal,
+            end,
+            chart: chart.await.transpose()?,
+        })
     }
 
     /// Parse own stream of lines into `Entry`s
     pub fn entries(&self) -> BoxStream<Result<Entry>> {
         self.entries_filtered(None, None)
+    }
+
+    pub fn chart(&self) -> Option<&ChartOfAccounts> {
+        self.chart.as_ref()
+    }
+
+    pub fn account(&self, name: &str) -> Option<&Account> {
+        self.chart.as_ref().and_then(|c| c.get(name))
     }
 
     /// Parse own stream of lines into `Entry`s
@@ -154,11 +183,9 @@ impl Accounts {
         party: Option<String>,
     ) -> BoxStream<Result<Entry>> {
         match self.journal.clone() {
-            JournalSource::Stdin => entries_from_lines(lines(None), account, party),
-            JournalSource::Path(path) => {
-                entries_from_lines(lines(Some(path.clone())), account, party)
-            }
-            JournalSource::Str(s) => {
+            DocSource::Stdin => entries_from_lines(lines(None), account, party),
+            DocSource::Path(path) => entries_from_lines(lines(Some(path.clone())), account, party),
+            DocSource::Str(s) => {
                 // TODO maybe separate out the part that works with docs
                 let ls: Vec<_> = s
                     .lines()
@@ -270,18 +297,53 @@ impl Accounts {
 
     /// Get balances for each account appearing in own stream of `JournalEntry`s
     pub fn balances(&self) -> impl Future<Output = Result<Balances>> {
-        self.balances_filtered(None, None)
+        self.balances_filtered(None, None, None)
     }
 
-    pub fn balances_filtered(
+    pub async fn balances_filtered(
         &self,
         // filter by account
         account: Option<String>,
         // filter by party
         party: Option<String>,
-    ) -> impl Future<Output = Result<Balances>> {
+        // filter by permanence
+        is_real: Option<bool>,
+    ) -> Result<Balances> {
         let lines = self.journal_lines_filtered(account, party);
-        balances_from_journal_lines(lines)
+        let mut balances = balances_from_journal_lines(lines).await?;
+        // add full account objects from chart if possible
+        // TODO auto add details for Accounts Payable/Receivable?
+        if let Some(chart) = self.chart() {
+            balances = balances
+                .into_iter()
+                .map(|(name, (amt, account))| {
+                    (
+                        name.clone(),
+                        (amt, account.or_else(|| chart.get(&name).cloned())),
+                    )
+                })
+                .collect();
+        };
+        if let Some(is_real) = is_real {
+            balances = balances
+                .into_iter()
+                .map(|b| {
+                    let a = b.1.1.clone().context(format!(
+                        "Permanence filter applied but cannot be determined for account: {}",
+                        b.0
+                    ))?;
+                    anyhow::Ok((b, a))
+                })
+                .filter_map_ok(|(b, a)| {
+                    if a.is_real() == is_real {
+                        Some(b)
+                    } else {
+                        None
+                    }
+                })
+                .try_collect()?;
+        }
+        Ok(balances)
     }
 
     pub fn journal_lines_filtered(
@@ -328,8 +390,8 @@ impl Accounts {
             .iter()
             .try_fold(report, |report, (account, balance)| {
                 // recursively find total in report to which account applies and add name to list and value to total
-                let account = chart.get(account)?;
-                report.apply_balance((account, balance))?;
+                let account = chart.get(account).context("Account not found")?;
+                report.apply_balance((account, &balance.0))?;
                 Ok(report)
             })
     }
@@ -341,7 +403,7 @@ impl Accounts {
         // filter out zero balances
         Ok(balances
             .into_iter()
-            .filter(|(_, amt)| amt.abs_amount() != Money::default())
+            .filter(|(_, (amt, _))| amt.abs_amount() != Money::default())
             .collect())
     }
 
@@ -352,7 +414,7 @@ impl Accounts {
         // filter out zero balances
         Ok(balances
             .into_iter()
-            .filter(|(_, amt)| amt.abs_amount() != Money::default())
+            .filter(|(_, (amt, _))| amt.abs_amount() != Money::default())
             .collect())
     }
 }

@@ -1,26 +1,29 @@
 ---
-name: Operating Expenses
-type: Expense
-tags: [Indirect]
----
-name: Credit Card
-description: Account ending in 0000
-type: Liability
-tags: [Currrent]
----
+class: Asset
 name: Business Checking
 description: Account ending in 0000
-type: Asset
 tags: [Currrent]
 ---
+class: Asset
+name: Accounts Receivable
+tags: [Current]
+---
+class: Liability
+name: Credit Card
+description: Account ending in 0000
+tags: [Currrent]
+---
+class: Liability
+name: Accounts Payable
+tags: [Current]
+---
+class: Equity
+name: Capital
+---
+class: Revenue
 name: Widget Sales
-type: Revenue
 tags: [Direct]
 ---
-name: Accounts Receivable
-type: Asset
-tags: [Current]
----
-name: Accounts Payable
-type: Liability
-tags: [Current]
+class: Expense
+name: Operating Expenses
+tags: [Indirect]

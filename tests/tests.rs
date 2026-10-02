@@ -1,28 +1,27 @@
-use self::JournalAmountTest::*;
-use accounts::account::Type::*;
+use accounts::account::BalanceType::*;
+use accounts::account::Class::*;
 use accounts::chart_of_accounts::ChartOfAccounts;
 use accounts::entry::Entry;
-use accounts::entry::journal::BalanceType;
-use accounts::render_table::{RenderTable, RenderTableOpts};
+use accounts::render_table::RenderTable;
+use accounts::render_table::{RenderStreamTable, RenderTableOpts};
 use accounts::report::ReportNode;
 use accounts::*;
-use anyhow::{Result, bail};
-use entry::journal::{JournalAccount, JournalAmount, JournalEntry};
+use anyhow::Result;
 use futures::StreamExt;
 use futures::stream::TryStreamExt;
 use indoc::indoc;
 use insta::assert_snapshot;
 use itertools::Itertools;
-use std::collections::HashMap;
-use std::convert::TryInto;
 
 /// Test that a dir containing one entry per file parses without error
 #[async_std::test]
 async fn test_basic_entries() -> Result<()> {
     let instance = Accounts::new(
-        JournalSource::Path("./tests/fixtures/entries_flat".to_string()),
+        DocSource::Path("./tests/fixtures/entries_flat".to_string()),
         None,
-    );
+        None,
+    )
+    .await?;
     let entries = instance.entries().try_collect::<Vec<Entry>>().await?;
     dbg!(&entries);
     let count = entries.iter().map(|entry| entry.id()).unique().count();
@@ -34,9 +33,11 @@ async fn test_basic_entries() -> Result<()> {
 #[async_std::test]
 async fn test_nested_dirs() -> Result<()> {
     let instance = Accounts::new(
-        JournalSource::Path("./tests/fixtures/entries_nested_dirs".to_string()),
+        DocSource::Path("./tests/fixtures/entries_nested_dirs".to_string()),
         None,
-    );
+        None,
+    )
+    .await?;
     let entries = instance.entries().try_collect::<Vec<Entry>>().await?;
     dbg!(&entries);
     let count = entries.iter().map(|entry| entry.id()).unique().count();
@@ -48,9 +49,11 @@ async fn test_nested_dirs() -> Result<()> {
 #[async_std::test]
 async fn test_multiple_entries_in_one_file() -> Result<()> {
     let instance = Accounts::new(
-        JournalSource::Path("./tests/fixtures/entries_multiple_entries_in_one_file".to_string()),
+        DocSource::Path("./tests/fixtures/entries_multiple_entries_in_one_file".to_string()),
         None,
-    );
+        None,
+    )
+    .await?;
     let entries = instance.entries().try_collect::<Vec<Entry>>().await?;
     dbg!(&entries);
     let count = entries.iter().map(|entry| entry.id()).unique().count();
@@ -62,9 +65,11 @@ async fn test_multiple_entries_in_one_file() -> Result<()> {
 #[async_std::test]
 async fn test_journal_from_entries() -> Result<()> {
     let instance = Accounts::new(
-        JournalSource::Path("./tests/fixtures/entries".to_string()),
+        DocSource::Path("./tests/fixtures/entries".to_string()),
         None,
-    );
+        None,
+    )
+    .await?;
 
     let journal = instance
         .journal()
@@ -78,28 +83,31 @@ async fn test_journal_from_entries() -> Result<()> {
         .join("\n");
 
     // TODO automatically add memos for invoices that don't have them
+    println!("{journal}");
     assert_snapshot!(journal, @r"
     Date       │ Particulars                       │       Debits │      Credits  
-    2020-01-01 │ Operating Expenses                │       100.00 │               
-               │ Accounts Payable                  │              │       100.00  
-    2020-01-02 │ Accounts Payable                  │       100.00 │               
-               │ Credit Card                       │              │       100.00  
+    2020-01-01 │ Business Checking                 │     1,000.00 │               
+               │ Capital                           │              │     1,000.00  
+               │ (Opening entry)                                                  
+    2020-01-01 │ Operating Expenses                │        10.00 │               
+               │ Accounts Payable                  │              │        10.00  
+    2020-01-02 │ Accounts Payable                  │        10.00 │               
+               │ Credit Card                       │              │        10.00  
                │ (Business Services)                                              
     2020-01-03 │ Operating Expenses                │        50.00 │               
                │ Business Checking                 │              │        50.00  
-    2020-01-04 │ Operating Expenses                │       100.00 │               
-               │ Accounts Payable                  │              │       100.00  
-    2020-01-05 │ Accounts Receivable               │        10.00 │               
-               │ Widget Sales                      │              │        10.00  
-    2020-01-06 │ Business Checking                 │        10.00 │               
-               │ Accounts Receivable               │              │        10.00  
+    2020-01-04 │ Operating Expenses                │        50.00 │               
+               │ Accounts Payable                  │              │        50.00  
+    2020-01-05 │ Accounts Receivable               │       100.00 │               
+               │ Widget Sales                      │              │       100.00  
+    2020-01-06 │ Business Checking                 │       100.00 │               
+               │ Accounts Receivable               │              │       100.00  
                │ (Widget)                                                         
-    2020-01-07 │ Business Checking                 │         5.00 │               
-               │ Widget Sales                      │              │         5.00  
+    2020-01-07 │ Business Checking                 │        30.00 │               
+               │ Widget Sales                      │              │        30.00  
     2020-01-08 │ Accounts Receivable               │        10.00 │               
                │ Widget Sales                      │              │        10.00
     ");
-    println!("{journal}");
     Ok(())
 }
 
@@ -115,7 +123,7 @@ async fn journal_entry() -> Result<()> {
         credits:
           Owner Contributions: 15,000
     "};
-    let instance = Accounts::new(JournalSource::Str(JOURNAL.to_string()), None);
+    let instance = Accounts::new(DocSource::Str(JOURNAL.to_string()), None, None).await?;
 
     let journal = instance
         .journal()
@@ -129,12 +137,12 @@ async fn journal_entry() -> Result<()> {
         .await
         .join("\n");
 
+    println!("{journal}");
     assert_snapshot!(journal, @r"
     2020-01-01 │ Bank                              │    15,000.00 │               
                │ Owner Contributions               │              │    15,000.00  
                │ (Initial Contribution)
     ");
-    println!("{journal}");
     Ok(())
 }
 
@@ -142,40 +150,30 @@ async fn journal_entry() -> Result<()> {
 #[async_std::test]
 async fn test_ledger() -> Result<()> {
     let instance = Accounts::new(
-        JournalSource::Path("./tests/fixtures/entries".to_string()),
+        DocSource::Path("./tests/fixtures/entries".to_string()),
         None,
-    );
-    let ledger_lines: Vec<LedgerLine> = instance.ledger("Business Checking").try_collect().await?;
-    // with running totals
-    let ledger_lines = ledger_lines
-        .iter()
-        .sorted_by_key(|l| l.date)
-        .scan(JournalAmount::default(), |acc, line| {
-            *acc += line.amount;
-            Some(LedgerLine {
-                running_total: *acc,
-                ..line.clone()
-            })
+        None,
+    )
+    .await?;
+    let ledger = instance
+        .ledger("Business Checking")
+        .render(RenderTableOpts {
+            balance: Some(Debit),
+            width: Some(80),
+            no_colors: true,
+            ..Default::default()
         })
-        .collect::<Vec<LedgerLine>>();
+        .collect::<Vec<String>>()
+        .await
+        .join("\n");
 
-    assert_eq!(dbg!(&ledger_lines).iter().count(), 3);
-    Expect(&ledger_lines)
-        .contains(
-            "2020-01-03",
-            JournalAmount::credit(50.00)?,
-            JournalAmount::credit(50.00)?,
-        )
-        .contains(
-            "2020-01-06",
-            JournalAmount::debit(10.00)?,
-            JournalAmount::credit(40.00)?,
-        )
-        .contains(
-            "2020-01-07",
-            JournalAmount::debit(5.00)?,
-            JournalAmount::credit(35.00)?,
-        );
+    assert_snapshot!(ledger, @r"
+    Date       │ Memo               │        Debit │       Credit │   Dr Balance  
+    2020-01-01 │ Opening entry      │     1,000.00 │              │     1,000.00  
+    2020-01-03 │                    │              │        50.00 │       950.00  
+    2020-01-06 │ Widget             │       100.00 │              │     1,050.00  
+    2020-01-07 │                    │        30.00 │              │     1,080.00
+    ");
     Ok(())
 }
 
@@ -183,81 +181,129 @@ async fn test_ledger() -> Result<()> {
 #[async_std::test]
 async fn test_balance() -> Result<()> {
     let instance = Accounts::new(
-        JournalSource::Path("./tests/fixtures/entries".to_string()),
+        DocSource::Path("./tests/fixtures/entries".to_string()),
         None,
-    );
-    let balances = instance.balances().await?;
-    assert_eq!(balances.len(), 6);
-    Expect(&balances)
-        .contains("Operating Expenses", Debit(250.00))
-        .contains("Accounts Payable", Credit(100.00))
-        .contains("Credit Card", Credit(100.00))
-        .contains("Business Checking", Credit(35.00))
-        .contains("Widget Sales", Credit(25.00))
-        .contains("Accounts Receivable", Debit(10.00));
+        None,
+    )
+    .await?;
+    let balances = instance.balances().await?.render(RenderTableOpts {
+        width: Some(80),
+        no_colors: true,
+        ..Default::default()
+    });
+
+    println!("{balances}");
+    // accounts are sorted by name
+    assert_snapshot!(balances, @r"
+    Account                                        │        Debit │       Credit  
+    Accounts Payable                               │              │        50.00  
+    Accounts Receivable                            │        10.00 │               
+    Business Checking                              │     1,080.00 │               
+    Capital                                        │              │     1,000.00  
+    Credit Card                                    │              │        10.00  
+    Operating Expenses                             │       110.00 │               
+    Widget Sales                                   │              │       140.00  
+    TOTAL                                          │     1,200.00 │     1,200.00
+    ");
     Ok(())
 }
 
-/// Test journal entries from recurring entries
 #[async_std::test]
-async fn test_recurring() -> Result<()> {
+async fn test_balance_with_chart() -> Result<()> {
     let instance = Accounts::new(
-        JournalSource::Path("./tests/fixtures/entries_recurring".to_string()),
+        DocSource::Path("./tests/fixtures/entries".to_string()),
         None,
-    );
+        Some(DocSource::Path(
+            "./tests/fixtures/ChartOfAccounts.yaml".to_string(),
+        )),
+    )
+    .await?;
+    let balances = instance.balances().await?.render(RenderTableOpts {
+        width: Some(80),
+        no_colors: true,
+        ..Default::default()
+    });
 
-    let journal_entries: Vec<JournalEntry> = instance.journal().try_collect().await?;
+    println!("{balances}");
+    // accounts are sorted by class and position in chart of accounts
+    assert_snapshot!(balances, @r"
+    Account                                        │        Debit │       Credit  
+    Business Checking                              │     1,080.00 │               
+    Accounts Receivable                            │        10.00 │               
+    Credit Card                                    │              │        10.00  
+    Accounts Payable                               │              │        50.00  
+    Capital                                        │              │     1,000.00  
+    Widget Sales                                   │              │       140.00  
+    Operating Expenses                             │       110.00 │               
+    TOTAL                                          │     1,200.00 │     1,200.00
+    ");
+    Ok(())
+}
 
-    assert_eq!(dbg!(&journal_entries).iter().count(), 6);
-    Expect(&journal_entries)
-        .contains(
-            "2020-01-01",
-            "Operating Expenses",
-            JournalAmount::debit(100.00)?,
-        )
-        .contains(
-            "2020-01-01",
-            "Accounts Payable",
-            JournalAmount::credit(100.00)?,
-        )
-        .contains(
-            "2020-01-02",
-            "Accounts Payable",
-            JournalAmount::debit(100.00)?,
-        )
-        .contains("2020-01-02", "Bank Account", JournalAmount::credit(100.00)?)
-        .contains(
-            "2020-02-01",
-            "Operating Expenses",
-            JournalAmount::debit(100.00)?,
-        )
-        .contains(
-            "2020-02-01",
-            "Accounts Payable",
-            JournalAmount::credit(100.00)?,
-        )
-        .contains(
-            "2020-02-03",
-            "Accounts Payable",
-            JournalAmount::debit(100.00)?,
-        )
-        .contains("2020-02-03", "Bank Account", JournalAmount::credit(100.00)?)
-        .contains(
-            "2020-03-01",
-            "Operating Expenses",
-            JournalAmount::debit(150.00)?,
-        )
-        .contains(
-            "2020-03-01",
-            "Accounts Payable",
-            JournalAmount::credit(150.00)?,
-        )
-        .contains(
-            "2020-03-02",
-            "Accounts Payable",
-            JournalAmount::debit(150.00)?,
-        )
-        .contains("2020-03-02", "Bank Account", JournalAmount::credit(150.00)?);
+#[async_std::test]
+async fn test_balance_real() -> Result<()> {
+    let instance = Accounts::new(
+        DocSource::Path("./tests/fixtures/entries".to_string()),
+        None,
+        Some(DocSource::Path(
+            "./tests/fixtures/ChartOfAccounts.yaml".to_string(),
+        )),
+    )
+    .await?;
+    let balances = instance
+        // passing is_real true
+        .balances_filtered(None, None, Some(true))
+        .await?
+        .render(RenderTableOpts {
+            width: Some(80),
+            no_colors: true,
+            ..Default::default()
+        });
+
+    println!("{balances}");
+    // accounts are sorted by class and position in chart of accounts
+    assert_snapshot!(balances, @r"
+    Account                                        │        Debit │       Credit  
+    Business Checking                              │     1,080.00 │               
+    Accounts Receivable                            │        10.00 │               
+    Credit Card                                    │              │        10.00  
+    Accounts Payable                               │              │        50.00  
+    Capital                                        │              │     1,000.00  
+    TOTAL                                          │     1,090.00 │     1,060.00  
+    NET                                            │        30.00 │
+    ");
+    Ok(())
+}
+
+#[async_std::test]
+async fn test_balance_nominal() -> Result<()> {
+    let instance = Accounts::new(
+        DocSource::Path("./tests/fixtures/entries".to_string()),
+        None,
+        Some(DocSource::Path(
+            "./tests/fixtures/ChartOfAccounts.yaml".to_string(),
+        )),
+    )
+    .await?;
+    let balances = instance
+        // passing is_real false
+        .balances_filtered(None, None, Some(false))
+        .await?
+        .render(RenderTableOpts {
+            width: Some(80),
+            no_colors: true,
+            ..Default::default()
+        });
+
+    println!("{balances}");
+    // accounts are sorted by class and position in chart of accounts
+    assert_snapshot!(balances, @r"
+    Account                                        │        Debit │       Credit  
+    Widget Sales                                   │              │       140.00  
+    Operating Expenses                             │       110.00 │               
+    TOTAL                                          │       110.00 │       140.00  
+    NET                                            │              │        30.00
+    ");
     Ok(())
 }
 
@@ -304,13 +350,15 @@ async fn ordered_recurring() -> Result<()> {
     "};
 
     let instance = Accounts::new(
-        JournalSource::Str(JOURNAL.to_string()),
+        DocSource::Str(JOURNAL.to_string()),
         Some("2020-03-31".parse()?),
-    );
+        None,
+    )
+    .await?;
     let ledger = instance
         .ledger("Accounts Payable")
         .render(RenderTableOpts {
-            balance: Some(BalanceType::Credit),
+            balance: Some(Credit),
             width: Some(80),
             no_colors: true,
             ..Default::default()
@@ -350,12 +398,21 @@ async fn test_chart_of_accounts() -> Result<()> {
         ChartOfAccounts::from_file("./tests/fixtures/ChartOfAccounts.yaml").await?;
     dbg!(&chart_of_accounts);
     assert_eq!(
-        chart_of_accounts.get("Operating Expenses")?.acc_type,
+        chart_of_accounts.get("Operating Expenses").unwrap().class,
         Expense
     );
-    assert_eq!(chart_of_accounts.get("Credit Card")?.acc_type, Liability);
-    assert_eq!(chart_of_accounts.get("Business Checking")?.acc_type, Asset);
-    assert_eq!(chart_of_accounts.get("Widget Sales")?.acc_type, Revenue);
+    assert_eq!(
+        chart_of_accounts.get("Credit Card").unwrap().class,
+        Liability
+    );
+    assert_eq!(
+        chart_of_accounts.get("Business Checking").unwrap().class,
+        Asset
+    );
+    assert_eq!(
+        chart_of_accounts.get("Widget Sales").unwrap().class,
+        Revenue
+    );
     Ok(())
 }
 
@@ -366,20 +423,20 @@ async fn test_report() -> Result<()> {
     dbg!(&report);
     dbg!(&items);
     assert_eq!(
-        items[3].0,
-        vec!["Income Statement", "Expenses", "Indirect Expenses", "Rent"]
-    );
-    assert_eq!(
-        items[4].0,
-        vec!["Income Statement", "Expenses", "Direct Expenses"]
-    );
-    assert_eq!(
-        items[6].0,
+        items[2].0,
         vec!["Income Statement", "Revenue", "Direct Revenue"]
     );
     assert_eq!(
-        items[7].0,
+        items[3].0,
         vec!["Income Statement", "Revenue", "Indirect Revenue"]
+    );
+    assert_eq!(
+        items[5].0,
+        vec!["Income Statement", "Expenses", "Direct Expenses"]
+    );
+    assert_eq!(
+        items[7].0,
+        vec!["Income Statement", "Expenses", "Indirect Expenses", "Rent"]
     );
     Ok(())
 }
@@ -387,110 +444,30 @@ async fn test_report() -> Result<()> {
 #[async_std::test]
 async fn test_run_report() -> Result<()> {
     let instance = Accounts::new(
-        JournalSource::Path("./tests/fixtures/entries".to_string()),
+        DocSource::Path("./tests/fixtures/entries".to_string()),
         None,
-    );
+        None,
+    )
+    .await?;
     let chart_of_accounts =
         ChartOfAccounts::from_file("./tests/fixtures/ChartOfAccounts.yaml").await?;
     let mut report = ReportNode::from_file("./tests/fixtures/IncomeStatement.yaml").await?;
+    // TODO run report with chart on instance
     instance.run_report(&chart_of_accounts, &mut report).await?;
     let items = report.items()?;
     dbg!(&items);
     println!("{report}");
 
-    assert_eq!(items[0].0, vec!["Income Statement"],);
-    assert_eq!(items[0].2.0, vec!["Operating Expenses", "Widget Sales"]);
-    assert_eq!(items[0].2.1, JournalAmount::Debit(225.00.try_into()?));
-
-    assert_eq!(
-        items[4].0,
-        vec!["Income Statement", "Expenses", "Indirect Expenses", "Other"],
-    );
-    assert_eq!(items[4].2.0, vec!["Operating Expenses"]);
-    assert_eq!(items[4].2.1, JournalAmount::Debit(250.00.try_into()?));
-
-    assert_eq!(items[6].0, vec!["Income Statement", "Revenue"]);
-    assert_eq!(items[6].2.0, vec!["Widget Sales"]);
-    assert_eq!(items[6].2.1, JournalAmount::Credit(25.00.try_into()?));
-
-    assert_eq!(
-        items[7].0,
-        vec!["Income Statement", "Revenue", "Direct Revenue"]
-    );
-    assert_eq!(items[7].2.0, vec!["Widget Sales"]);
-    assert_eq!(items[7].2.1, JournalAmount::Credit(25.00.try_into()?));
-
-    assert_eq!(
-        items[8].0,
-        vec!["Income Statement", "Revenue", "Indirect Revenue"]
-    );
-    assert!(items[8].2.0.is_empty());
-    assert_eq!(items[8].2.1, JournalAmount::default());
-
+    assert_snapshot!(report, @r"
+    Income Statement                30.00
+      Revenue                       140.00
+        Direct Revenue              140.00
+        Indirect Revenue            0.00
+      Expenses                      110.00
+        Direct Expenses             0.00
+        Indirect Expenses           110.00
+          Rent                      0.00
+          Other                     110.00
+    ");
     Ok(())
-}
-
-#[derive(Debug)]
-enum JournalAmountTest {
-    Debit(f64),
-    Credit(f64),
-}
-
-/// struct for special assertions
-struct Expect<'a, T>(&'a T);
-
-impl Expect<'_, Vec<LedgerLine>> {
-    fn contains(&self, date: &str, amount: JournalAmount, total: JournalAmount) -> &Self {
-        assert!(
-            self.0.iter().any(|actual| {
-                actual.date.to_string() == date
-                    && actual.amount == amount
-                    && actual.running_total == total
-            }),
-            "ledger line with date {date} amount {:?} and running total {:?} not found in {:?}",
-            amount,
-            total,
-            self.0
-        );
-        self
-    }
-}
-
-impl Expect<'_, Vec<JournalEntry>> {
-    fn contains(&self, date: &str, account: &str, amount: JournalAmount) -> &Self {
-        assert!(
-            self.0.iter().any(|actual| {
-                actual.date().to_string() == date
-                    && actual
-                        .lines()
-                        .iter()
-                        .any(|l| l.0 == account && l.1 == amount)
-            }),
-            "entry with date {:?} with account {:?} for {:?} not found in {:?}",
-            date,
-            account,
-            amount,
-            self.0
-        );
-        self
-    }
-}
-
-impl Expect<'_, HashMap<JournalAccount, JournalAmount>> {
-    fn contains(&self, account: &str, amount: JournalAmountTest) -> &Self {
-        let amount = match amount {
-            Debit(m) => JournalAmount::Debit(m.try_into().unwrap()),
-            Credit(m) => JournalAmount::Credit(m.try_into().unwrap()),
-        };
-        assert!(
-            self.0
-                .iter()
-                .any(|actual| actual.0 == account && actual.1 == &amount),
-            "({}: {:?}) not found in {:?}",
-            account,
-            amount,
-            self.0
-        );
-        self
-    }
 }

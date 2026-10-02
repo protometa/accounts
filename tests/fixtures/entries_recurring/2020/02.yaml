@@ -1,7 +1,0 @@
----
-type: Payment Sent
-date: 2020-02-03
-party: ACME Business Services
-memo: Business Services
-account: Bank Account
-amount: 100

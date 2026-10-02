@@ -4,9 +4,9 @@ mod raw;
 use crate::{
     account::{
         Account,
-        Sign::{self, *},
+        BalanceType::{self, *},
+        Class::{self, *},
         Tag,
-        Type::{self, *},
     },
     entry::journal::JournalAmount,
 };
@@ -24,7 +24,7 @@ use std::{
 #[derive(Debug, Default, Clone)]
 pub struct ReportNode {
     pub header: String,
-    pub types: Vec<Type>,
+    pub types: Vec<Class>,
     pub names: Vec<String>,
     pub tags: Vec<Tag>,
     pub children: Vec<ReportNode>,
@@ -36,7 +36,7 @@ pub struct ReportNode {
 #[derive(Debug, Default, Clone)]
 pub struct Total(pub Vec<String>, pub JournalAmount);
 
-type LineItem = (Vec<String>, Sign, Total);
+type LineItem = (Vec<String>, BalanceType, Total);
 
 impl ReportNode {
     pub async fn from_file(file: &str) -> Result<Self> {
@@ -71,13 +71,13 @@ impl ReportNode {
     fn matches(&self, account: &Account) -> bool {
         // account type must match if specified
         // in addition to matching on name or tags if they are specified
-        (self.types.is_empty() || self.types.contains(&account.acc_type))
+        (self.types.is_empty() || self.types.contains(&account.class))
             && ((self.names.is_empty() && self.tags.is_empty())
                 || (self.names.contains(&account.name)
                     || self.tags.iter().any(|t| account.has_tag(t))))
     }
 
-    fn default_sign(&self) -> Sign {
+    fn default_sign(&self) -> BalanceType {
         if self.has_type(Equity) {
             Debit
         } else if self.has_type(Revenue) {
@@ -91,7 +91,7 @@ impl ReportNode {
         }
     }
 
-    fn has_type(&self, t1: Type) -> bool {
+    fn has_type(&self, t1: Class) -> bool {
         self.types.contains(&t1)
     }
 
@@ -102,7 +102,7 @@ impl ReportNode {
     fn items_with(
         &self,
         mut path: Vec<String>,
-        sign: Option<Sign>,
+        sign: Option<BalanceType>,
     ) -> Result<Box<dyn Iterator<Item = LineItem>>> {
         path.push(self.header.clone());
         let sign = if self.types.is_empty() {
@@ -226,7 +226,7 @@ mod report_tests {
             ..Default::default()
         };
         let account = Account {
-            acc_type: Expense,
+            class: Expense,
             ..Default::default()
         };
         assert!(node.matches(&account), "Matches account based on type");
@@ -257,7 +257,7 @@ mod report_tests {
             ..Default::default()
         };
         let account = Account {
-            acc_type: Asset,
+            class: Asset,
             tags: tags!["Current", "Bank"]?,
             ..Default::default()
         };
@@ -273,7 +273,7 @@ mod report_tests {
         };
         let account = Account {
             name: "Misc".to_string(),
-            acc_type: Asset,
+            class: Asset,
             ..Default::default()
         };
         assert!(
@@ -308,7 +308,7 @@ mod report_tests {
             ..Default::default()
         };
         let account = Account {
-            acc_type: Asset,
+            class: Asset,
             tags: tags!["Current", "Bank"]?,
             ..Default::default()
         };

@@ -1,5 +1,8 @@
-use crate::entry::journal::JournalEntry;
-use crate::{LedgerLine, entry::journal::BalanceType};
+
+use crate::account::BalanceType::{self, Credit, Debit};
+use crate::entry::journal::{JournalAmount, JournalEntry};
+use crate::money::Money;
+use crate::{Balances, LedgerLine};
 use anyhow::Result;
 use colored_text::Colorize;
 use comfy_table::*;
@@ -7,11 +10,12 @@ use futures::StreamExt;
 use futures::future::{self};
 use futures::stream::{self, BoxStream};
 use itertools::Itertools;
+use std::string::ToString;
 
 enum TableRow<T> {
     Header,
     Body(usize, T),
-    InterBody,
+    InterBody, // TODO with alternating colors separating rows, probably don't need this anymore
     Footer,
 }
 
@@ -19,25 +23,22 @@ const DATE_COL_WIDTH: u16 = 12;
 const MONEY_COL_WIDTH: u16 = 14;
 const TABLE_MIN_WIDTH: u16 = 80;
 
-static HEADER_STYLE: TableStyle = TableStyle::new()
+static TABLE_STYLE: TableStyle = TableStyle::new()
     .header_lines(ContentLineStyle::new(' ', '│', ' '))
     .content_lines(ContentLineStyle::new(' ', '│', ' '));
 
-static BODY_STYLE: TableStyle =
-    TableStyle::new().content_lines(ContentLineStyle::new(' ', '│', ' '));
-
 // light theme
 // TODO allow toggle this
-// static FG_COLOR: &str = "000";
-// static BG_COLOR: &str = "fff";
-// static ALT_BG_COLOR: &str = "cee";
-// static HEADER_BG_COLOR: &str = "acc";
+static FG_COLOR: &str = "000";
+static BG_COLOR: &str = "fff";
+static ALT_BG_COLOR: &str = "cee";
+static HEADER_BG_COLOR: &str = "acc";
 
-// dark theme
-static FG_COLOR: &str = "bbb";
-static BG_COLOR: &str = "221";
-static ALT_BG_COLOR: &str = "332";
-static HEADER_BG_COLOR: &str = "554";
+// // dark theme
+// static FG_COLOR: &str = "bbb";
+// static BG_COLOR: &str = "221";
+// static ALT_BG_COLOR: &str = "332";
+// static HEADER_BG_COLOR: &str = "554";
 
 #[derive(Default)]
 pub struct RenderTableOpts {
@@ -74,11 +75,15 @@ fn as_table_rows<'a, T: Send + 'a>(s: BoxStream<'a, T>) -> BoxStream<'a, TableRo
         .boxed()
 }
 
-pub trait RenderTable<'a> {
+pub trait RenderStreamTable<'a> {
     fn render(self, opts: RenderTableOpts) -> BoxStream<'a, String>;
 }
 
-impl<'a> RenderTable<'a> for BoxStream<'a, Result<LedgerLine>> {
+pub trait RenderTable {
+    fn render(self, opts: RenderTableOpts) -> String;
+}
+
+impl<'a> RenderStreamTable<'a> for BoxStream<'a, Result<LedgerLine>> {
     fn render(
         self,
         RenderTableOpts {
@@ -86,6 +91,7 @@ impl<'a> RenderTable<'a> for BoxStream<'a, Result<LedgerLine>> {
             width,
             no_colors,
             body_only,
+            ..
         }: RenderTableOpts,
     ) -> BoxStream<'a, String> {
         as_table_rows(self)
@@ -100,11 +106,11 @@ impl<'a> RenderTable<'a> for BoxStream<'a, Result<LedgerLine>> {
                 TableRow::Header => {
                     let mut t = Table::new();
                     let drcr = match balance {
-                        Some(BalanceType::Debit) => "Dr",
-                        Some(BalanceType::Credit) => "Cr",
+                        Some(Debit) => "Dr",
+                        Some(Credit) => "Cr",
                         None => "??",
                     };
-                    t.load_style(HEADER_STYLE).set_header([
+                    t.load_style(TABLE_STYLE).set_header([
                         "Date",
                         "Memo",
                         "Debit",
@@ -129,16 +135,16 @@ impl<'a> RenderTable<'a> for BoxStream<'a, Result<LedgerLine>> {
                             line.amount
                                 .as_abs_debit()
                                 .map(|m| m.to_string())
-                                .unwrap_or(String::default()),
+                                .unwrap_or_default(),
                             line.amount
                                 .as_abs_credit()
                                 .map(|m| m.to_string())
-                                .unwrap_or(String::default()),
+                                .unwrap_or_default(),
                             line.running_total
-                                .as_balance_type(balance.as_ref().unwrap_or(&BalanceType::Debit))
+                                .as_balance_type(balance.as_ref().unwrap_or(&Debit))
                                 .to_string(),
                         ];
-                        t.load_style(BODY_STYLE).add_row(row);
+                        t.load_style(TABLE_STYLE).add_row(row);
                         set_ledger_cols(&mut t, width);
                         let colorized_row = if no_colors {
                             t.to_string().clear()
@@ -198,14 +204,14 @@ fn set_ledger_cols(t: &mut comfy_table::Table, width: Option<u16>) {
 static JOURNAL_MEMO_STYLE: TableStyle =
     TableStyle::new().content_lines(ContentLineStyle::new(' ', '│', ' '));
 
-impl<'a> RenderTable<'a> for BoxStream<'a, Result<JournalEntry>> {
+impl<'a> RenderStreamTable<'a> for BoxStream<'a, Result<JournalEntry>> {
     fn render(
         self,
         RenderTableOpts {
-            balance: _,
             width,
             no_colors,
             body_only,
+            ..
         }: RenderTableOpts,
     ) -> BoxStream<'a, String> {
         as_table_rows(self)
@@ -219,7 +225,7 @@ impl<'a> RenderTable<'a> for BoxStream<'a, Result<JournalEntry>> {
                 TableRow::Header => {
                     let mut t = Table::new();
                     let header = ["Date", "Particulars", "Debits", "Credits"];
-                    t.load_style(HEADER_STYLE).set_header(header);
+                    t.load_style(TABLE_STYLE).set_header(header);
                     set_journal_cols(&mut t, width);
                     let colorized_row = if no_colors {
                         t.to_string().clear()
@@ -231,7 +237,7 @@ impl<'a> RenderTable<'a> for BoxStream<'a, Result<JournalEntry>> {
                 TableRow::Body(i, journal_entry) => match journal_entry {
                     Ok(journal_entry) => {
                         let mut lines_table = Table::new();
-                        lines_table.load_style(BODY_STYLE);
+                        lines_table.load_style(TABLE_STYLE);
                         let mut lines = journal_entry.lines().into_iter();
 
                         let initial = lines.next();
@@ -348,4 +354,134 @@ fn set_journal_memo_cols(t: &mut comfy_table::Table, width: Option<u16>) {
     t.column_mut(1)
         .unwrap()
         .set_constraint(ColumnConstraint::Absolute(Width::Fixed(memo_col_dyn_width)));
+}
+
+impl RenderTable for Balances {
+    fn render(
+        self,
+        RenderTableOpts {
+            width, no_colors, ..
+        }: RenderTableOpts,
+    ) -> String {
+        let totals = self.iter().fold(
+            (Money::default(), Money::default()),
+            |(mut dr, mut cr), (_, (amount, _))| {
+                dr += amount.as_abs_debit().unwrap_or_default();
+                cr += amount.as_abs_credit().unwrap_or_default();
+                (dr, cr)
+            },
+        );
+        // Still have to build rows like in streaming in order format foreground and background properly
+        let mut t = Table::new();
+        let header = ["Account", "Debit", "Credit"];
+        t.load_style(TABLE_STYLE).set_header(header);
+        set_balance_cols(&mut t, width);
+        let colorized_row = if no_colors {
+            t.to_string().clear()
+        } else {
+            t.to_string().hex(FG_COLOR).on_hex(HEADER_BG_COLOR).bold()
+        };
+        let header_string = colorized_row.to_string();
+
+        let row_strings = self
+            .iter()
+            // sort by index from chart (last if not found), or by name
+            .sorted_by_key(|a| {
+                (
+                    a.1.1.clone().and_then(|a| a.index).unwrap_or(usize::MAX),
+                    a.0,
+                )
+                // TODO maybe warn on not found account
+            })
+            .enumerate()
+            .map(|(i, (account, (amount, _)))| {
+                let row = [
+                    account.to_owned(),
+                    amount
+                        .as_abs_debit()
+                        .map(|m| m.to_string())
+                        .unwrap_or_default(),
+                    amount
+                        .as_abs_credit()
+                        .map(|m| m.to_string())
+                        .unwrap_or_default(),
+                ];
+                let mut t = Table::new();
+                t.load_style(TABLE_STYLE).add_row(row);
+                set_balance_cols(&mut t, width);
+                let colorized_row = if no_colors {
+                    t.to_string().clear()
+                } else if i % 2 == 0 {
+                    t.to_string().hex(FG_COLOR).on_hex(BG_COLOR)
+                } else {
+                    t.to_string().hex(FG_COLOR).on_hex(ALT_BG_COLOR)
+                };
+                colorized_row.to_string()
+            })
+            .collect();
+
+        let mut t = Table::new();
+        let total_row = ["TOTAL", &totals.0.to_string(), &totals.1.to_string()];
+        t.load_style(TABLE_STYLE).add_row(total_row);
+        set_balance_cols(&mut t, width);
+        let colorized_row = if no_colors {
+            t.to_string().clear()
+        } else {
+            t.to_string().hex(FG_COLOR).on_hex(HEADER_BG_COLOR).bold()
+        };
+        let mut total_strings = vec![colorized_row.to_string()];
+
+        if totals.0 != totals.1 {
+            let mut t = Table::new();
+            let mut net = JournalAmount::Debit(totals.0);
+            net += JournalAmount::Credit(totals.1);
+            let total_row = [
+                "NET",
+                &net.as_abs_debit()
+                    .map(|m| m.to_string())
+                    .unwrap_or_default(),
+                &net.as_abs_credit()
+                    .map(|m| m.to_string())
+                    .unwrap_or_default(),
+            ];
+            t.load_style(TABLE_STYLE).add_row(total_row);
+            set_balance_cols(&mut t, width);
+            let colorized_row = if no_colors {
+                t.to_string().clear()
+            } else {
+                t.to_string().hex(FG_COLOR).on_hex(HEADER_BG_COLOR).bold()
+            };
+            total_strings.push(colorized_row.to_string());
+        }
+
+        [vec![header_string], row_strings, total_strings]
+            .concat()
+            .join("\n")
+    }
+}
+
+const BALANCE_STATIC_WIDTH: u16 = MONEY_COL_WIDTH * 2 + 4;
+const BALANCE_TABLE_WIDTH: u16 = 90;
+
+fn set_balance_cols(t: &mut comfy_table::Table, width: Option<u16>) {
+    if let Some(w) = width {
+        t.set_width(w);
+    }
+    // this tells us above or tty width
+    let width = t
+        .width()
+        .unwrap_or(BALANCE_TABLE_WIDTH)
+        .clamp(TABLE_MIN_WIDTH, BALANCE_TABLE_WIDTH);
+    let acc_col_dyn_width = width.saturating_sub(BALANCE_STATIC_WIDTH);
+    t.column_mut(0)
+        .unwrap()
+        .set_constraint(ColumnConstraint::Absolute(Width::Fixed(acc_col_dyn_width)));
+    t.column_mut(1)
+        .unwrap()
+        .set_constraint(ColumnConstraint::Absolute(Width::Fixed(MONEY_COL_WIDTH)))
+        .set_cell_alignment(CellAlignment::Right);
+    t.column_mut(2)
+        .unwrap()
+        .set_constraint(ColumnConstraint::Absolute(Width::Fixed(MONEY_COL_WIDTH)))
+        .set_cell_alignment(CellAlignment::Right);
 }
