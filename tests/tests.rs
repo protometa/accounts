@@ -91,22 +91,28 @@ async fn test_journal_from_entries() -> Result<()> {
                │ (Opening entry)                                                  
     2020-01-01 │ Operating Expenses                │        10.00 │               
                │ Accounts Payable                  │              │        10.00  
+               │ (Purchase from ACME)                                             
     2020-01-02 │ Accounts Payable                  │        10.00 │               
                │ Credit Card                       │              │        10.00  
-               │ (Business Services)                                              
+               │ (Payment to ACME: Business Services)                             
     2020-01-03 │ Operating Expenses                │        50.00 │               
                │ Business Checking                 │              │        50.00  
+               │ (Purchase from ACME)                                             
     2020-01-04 │ Operating Expenses                │        50.00 │               
                │ Accounts Payable                  │              │        50.00  
+               │ (Purchase from ACME)                                             
     2020-01-05 │ Accounts Receivable               │       100.00 │               
                │ Widget Sales                      │              │       100.00  
+               │ (Sale to John Smith)                                             
     2020-01-06 │ Business Checking                 │       100.00 │               
                │ Accounts Receivable               │              │       100.00  
-               │ (Widget)                                                         
+               │ (Payment from John Smith: Widgets)                               
     2020-01-07 │ Business Checking                 │        30.00 │               
                │ Widget Sales                      │              │        30.00  
+               │ (Sale to John Smith)                                             
     2020-01-08 │ Accounts Receivable               │        10.00 │               
-               │ Widget Sales                      │              │        10.00
+               │ Widget Sales                      │              │        10.00  
+               │ (Sale to John Smith)
     ");
     Ok(())
 }
@@ -131,7 +137,6 @@ async fn journal_entry() -> Result<()> {
             width: Some(80),
             no_colors: true,
             body_only: true,
-            ..Default::default()
         })
         .collect::<Vec<String>>()
         .await
@@ -143,6 +148,31 @@ async fn journal_entry() -> Result<()> {
                │ Owner Contributions               │              │    15,000.00  
                │ (Initial Contribution)
     ");
+    Ok(())
+}
+
+#[async_std::test]
+async fn journal_entry_memo_only() -> Result<()> {
+    static JOURNAL: &str = indoc! {"
+        ---
+        date: 2020-01-01
+        memo: Journal entry to record note with no effect on accounts
+    "};
+    let instance = Accounts::new(DocSource::Str(JOURNAL.to_string()), None, None).await?;
+
+    let journal = instance
+        .journal()
+        .render_with(RenderTableOpts {
+            width: Some(80),
+            no_colors: true,
+            body_only: true,
+        })
+        .collect::<Vec<String>>()
+        .await
+        .join("\n");
+
+    println!("{journal}");
+    assert_snapshot!(journal, @"  2020-01-01 │ (Journal entry to record note with no effect on accounts)");
     Ok(())
 }
 
@@ -169,9 +199,10 @@ async fn test_ledger() -> Result<()> {
     assert_snapshot!(ledger, @r"
     Date       │ Memo               │        Debit │       Credit │   Dr Balance  
     2020-01-01 │ Opening entry      │     1,000.00 │              │     1,000.00  
-    2020-01-03 │                    │              │        50.00 │       950.00  
-    2020-01-06 │ Widget             │       100.00 │              │     1,050.00  
-    2020-01-07 │                    │        30.00 │              │     1,080.00
+    2020-01-03 │ Purchase from ACME │              │        50.00 │       950.00  
+    2020-01-06 │ Payment from John  │       100.00 │              │     1,050.00  
+               │ Smith: Widgets     │              │              │               
+    2020-01-07 │ Sale to John Smith │        30.00 │              │     1,080.00
     ");
     Ok(())
 }
@@ -315,38 +346,33 @@ async fn ordered_recurring() -> Result<()> {
         ---
         type: Purchase Invoice
         date: 2020-01-02
-        memo: Weekly bill
-        party: ACME Business Services
+        party: ACME
         account: Operating Expenses
         amount: 10
         repeat: weekly
         ---
         date: 2020-01-03
         type: Payment Sent
-        party: ACME Business Services
-        memo: Payment
+        party: ACME
         account: Checking
         amount: 50
         ---
         type: Purchase Invoice
         date: 2020-01-05
-        memo: Monthly bill
-        party: ACME Business Services
+        party: ACME
         account: Operating Expenses
         amount: 100
         repeat: monthly
         ---
         date: 2020-02-04
         type: Payment Sent
-        party: ACME Business Services
-        memo: Payment 
+        party: ACME
         account: Checking
         amount: 100
         ---
         date: 2020-03-06
         type: Payment Sent
-        party: ACME Business Services
-        memo: Payment
+        party: ACME
         account: Checking
         amount: 100
     "};
@@ -370,25 +396,25 @@ async fn ordered_recurring() -> Result<()> {
 
     assert_snapshot!(ledger, @r"
     Date       │ Memo               │        Debit │       Credit │   Cr Balance  
-    2020-01-02 │ Weekly bill        │              │        10.00 │        10.00  
-    2020-01-03 │ Payment            │        50.00 │              │      (40.00)  
-    2020-01-05 │ Monthly bill       │              │       100.00 │        60.00  
-    2020-01-09 │ Weekly bill        │              │        10.00 │        70.00  
-    2020-01-16 │ Weekly bill        │              │        10.00 │        80.00  
-    2020-01-23 │ Weekly bill        │              │        10.00 │        90.00  
-    2020-01-30 │ Weekly bill        │              │        10.00 │       100.00  
-    2020-02-04 │ Payment            │       100.00 │              │         0.00  
-    2020-02-05 │ Monthly bill       │              │       100.00 │       100.00  
-    2020-02-06 │ Weekly bill        │              │        10.00 │       110.00  
-    2020-02-13 │ Weekly bill        │              │        10.00 │       120.00  
-    2020-02-20 │ Weekly bill        │              │        10.00 │       130.00  
-    2020-02-27 │ Weekly bill        │              │        10.00 │       140.00  
-    2020-03-05 │ Weekly bill        │              │        10.00 │       150.00  
-    2020-03-05 │ Monthly bill       │              │       100.00 │       250.00  
-    2020-03-06 │ Payment            │       100.00 │              │       150.00  
-    2020-03-12 │ Weekly bill        │              │        10.00 │       160.00  
-    2020-03-19 │ Weekly bill        │              │        10.00 │       170.00  
-    2020-03-26 │ Weekly bill        │              │        10.00 │       180.00
+    2020-01-02 │ Purchase from ACME │              │        10.00 │        10.00  
+    2020-01-03 │ Payment to ACME    │        50.00 │              │      (40.00)  
+    2020-01-05 │ Purchase from ACME │              │       100.00 │        60.00  
+    2020-01-09 │ Purchase from ACME │              │        10.00 │        70.00  
+    2020-01-16 │ Purchase from ACME │              │        10.00 │        80.00  
+    2020-01-23 │ Purchase from ACME │              │        10.00 │        90.00  
+    2020-01-30 │ Purchase from ACME │              │        10.00 │       100.00  
+    2020-02-04 │ Payment to ACME    │       100.00 │              │         0.00  
+    2020-02-05 │ Purchase from ACME │              │       100.00 │       100.00  
+    2020-02-06 │ Purchase from ACME │              │        10.00 │       110.00  
+    2020-02-13 │ Purchase from ACME │              │        10.00 │       120.00  
+    2020-02-20 │ Purchase from ACME │              │        10.00 │       130.00  
+    2020-02-27 │ Purchase from ACME │              │        10.00 │       140.00  
+    2020-03-05 │ Purchase from ACME │              │        10.00 │       150.00  
+    2020-03-05 │ Purchase from ACME │              │       100.00 │       250.00  
+    2020-03-06 │ Payment to ACME    │       100.00 │              │       150.00  
+    2020-03-12 │ Purchase from ACME │              │        10.00 │       160.00  
+    2020-03-19 │ Purchase from ACME │              │        10.00 │       170.00  
+    2020-03-26 │ Purchase from ACME │              │        10.00 │       180.00
     ");
     Ok(())
 }

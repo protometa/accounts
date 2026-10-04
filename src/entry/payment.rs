@@ -10,6 +10,12 @@ pub struct Payment {
     pub amount: Money,
 }
 
+impl Payment {
+    pub fn party(&self) -> String {
+        self.party.clone()
+    }
+}
+
 impl TryFrom<raw::PaymentEntry> for Payment {
     type Error = Error;
 

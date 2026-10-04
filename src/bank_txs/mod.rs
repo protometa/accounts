@@ -312,6 +312,7 @@ mod bank_txs_tests {
         };
         let entry: Entry = indoc! {"
             date: 2020-01-03
+            memo: Opening
             debits:
               Bank: $1,000
             credits:

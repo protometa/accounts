@@ -157,7 +157,7 @@ pub struct JournalLine(pub JournalAccount, pub JournalAmount);
 pub struct JournalEntry {
     r#ref: String,
     date: NaiveDate,
-    memo: Option<String>,
+    memo: String,
     lines: JournalLines,
     // possible party from Entry
     party: Option<String>,
@@ -174,9 +174,6 @@ impl JournalLines {
         mut lines: Vec<JournalLine>,
         balance_account: Option<JournalAccount>,
     ) -> Result<Self> {
-        if lines.is_empty() {
-            bail!("Journal lines cannot be empty");
-        }
         let (total_debit, total_credit) = lines.iter().fold(
             (Money::zero(), Money::zero()),
             |(mut debit, mut credit), JournalLine(_, amount)| {
@@ -234,7 +231,7 @@ impl JournalEntry {
     pub fn new(
         r#ref: &str,
         date: &NaiveDate,
-        memo: Option<&str>,
+        memo: &str,
         lines: &[JournalLine],
         balance_account: Option<JournalAccount>,
         party: Option<&str>,
@@ -242,7 +239,7 @@ impl JournalEntry {
         Ok(JournalEntry {
             r#ref: r#ref.to_owned(),
             date: date.to_owned(),
-            memo: memo.map(|s| s.to_owned()),
+            memo: memo.to_owned(),
             lines: JournalLines::new(lines.to_owned(), balance_account)?,
             party: party.map(|s| s.to_owned()),
         })
@@ -252,7 +249,7 @@ impl JournalEntry {
         self.date
     }
 
-    pub fn memo(&self) -> Option<String> {
+    pub fn memo(&self) -> String {
         self.memo.clone()
     }
 
@@ -270,7 +267,7 @@ impl JournalEntry {
                 let party_pad = 32;
                 let account = account.to_string();
                 let amt_string = amount.to_row_string(12);
-                let memo = self.memo.clone().unwrap_or_default();
+                let memo = self.memo.clone();
                 if with_party {
                     let party = self.party.clone().unwrap_or_default();
                     format!(
@@ -292,7 +289,7 @@ impl fmt::Display for JournalEntry {
             let acc_pad = 25;
             let account = account.to_string();
             let amt_string = amount.to_row_string(12);
-            let memo = self.memo.clone().unwrap_or_default();
+            let memo = self.memo.clone();
             writeln!(f, "{date} | {account:acc_pad$} | {amt_string} | {memo}",)?
         }
         Ok(())

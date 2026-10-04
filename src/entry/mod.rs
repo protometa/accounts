@@ -196,7 +196,11 @@ impl Entry {
                 JournalEntry::new(
                     &self.id,
                     &date,
-                    self.memo.as_deref(),
+                    &format!(
+                        "Purchase from {}{}",
+                        invoice.party(),
+                        self.memo().map(|m| format!(": {m}")).unwrap_or_default()
+                    ),
                     &lines,
                     Some("Accounts Payable".to_string()),
                     self.party().as_deref(),
@@ -205,7 +209,11 @@ impl Entry {
             Body::PaymentSent(payment) => JournalEntry::new(
                 &self.id,
                 &date,
-                self.memo.as_deref(),
+                &format!(
+                    "Payment to {}{}",
+                    payment.party(),
+                    self.memo().map(|m| format!(": {m}")).unwrap_or_default()
+                ),
                 &[
                     JournalLine(payment.account, Credit(payment.amount)),
                     JournalLine("Accounts Payable".to_string(), Debit(payment.amount)),
@@ -227,7 +235,11 @@ impl Entry {
                 JournalEntry::new(
                     &self.id,
                     &date,
-                    self.memo.as_deref(),
+                    &format!(
+                        "Sale to {}{}",
+                        invoice.party(),
+                        self.memo().map(|m| format!(": {m}")).unwrap_or_default()
+                    ),
                     &lines,
                     Some("Accounts Receivable".to_string()),
                     self.party().as_deref(),
@@ -236,7 +248,11 @@ impl Entry {
             Body::PaymentReceived(payment) => JournalEntry::new(
                 &self.id,
                 &date,
-                self.memo.as_deref(),
+                &format!(
+                    "Payment from {}{}",
+                    payment.party(),
+                    self.memo().map(|m| format!(": {m}")).unwrap_or_default()
+                ),
                 &[
                     JournalLine(payment.account, Debit(payment.amount)),
                     JournalLine("Accounts Receivable".to_string(), Credit(payment.amount)),
@@ -244,9 +260,14 @@ impl Entry {
                 None,
                 self.party().as_deref(),
             ),
-            Body::Journal(lines) => {
-                JournalEntry::new(&self.id, &date, self.memo.as_deref(), &lines, None, None)
-            }
+            Body::Journal(lines) => JournalEntry::new(
+                &self.id,
+                &date,
+                &self.memo().context("Memo required on Journal Entries")?,
+                &lines,
+                None,
+                None,
+            ),
         }
     }
 }
@@ -301,31 +322,31 @@ impl TryFrom<raw::Entry> for Entry {
                     // TODO refactor this out to reusable function
                     let debit_lines: Box<dyn Iterator<Item = Result<JournalLine>>> =
                         match raw_entry.debits {
-                            Lines::Simple(hashmap) => {
+                            Some(Lines::Simple(hashmap)) => {
                                 Box::new(hashmap.into_iter().map(|(account, amount)| {
                                     Ok(JournalLine(account.to_owned(), Debit(amount)))
                                 }))
                             }
-                            Lines::Expanded(expanded) => Box::new(expanded.into_iter().map(
+                            Some(Lines::Expanded(expanded)) => Box::new(expanded.into_iter().map(
                                 |ExpandedLine { account, amount }| {
                                     Ok(JournalLine(account.to_owned(), Debit(amount)))
                                 },
                             )),
-                            Lines::Empty => bail!("Debit lines cannot be empty"),
+                            _ => Box::new(iter::empty()),
                         };
                     let credit_lines: Box<dyn Iterator<Item = Result<JournalLine>>> =
                         match raw_entry.credits {
-                            Lines::Simple(hashmap) => {
+                            Some(Lines::Simple(hashmap)) => {
                                 Box::new(hashmap.into_iter().map(|(account, amount)| {
                                     Ok(JournalLine(account.to_owned(), Credit(amount)))
                                 }))
                             }
-                            Lines::Expanded(expanded) => Box::new(expanded.into_iter().map(
+                            Some(Lines::Expanded(expanded)) => Box::new(expanded.into_iter().map(
                                 |ExpandedLine { account, amount }| {
                                     Ok(JournalLine(account.to_owned(), Credit(amount)))
                                 },
                             )),
-                            Lines::Empty => bail!("Credit lines cannot be empty"),
+                            _ => Box::new(iter::empty()),
                         };
                     let lines = credit_lines
                         .chain(debit_lines)
@@ -337,11 +358,7 @@ impl TryFrom<raw::Entry> for Entry {
     }
 }
 
-// impl TryInto<raw::Entry> for Entry {
 impl From<Entry> for raw::Entry {
-    // type Error = Error;
-
-    // fn try_into(self) -> std::result::Result<raw::Entry, Self::Error> {
     fn from(val: Entry) -> Self {
         // let id = Some(val.id);
         let date = val.date().to_string();
@@ -362,9 +379,9 @@ impl From<Entry> for raw::Entry {
                 raw::Entry::JournalEntry(raw::JournalEntry {
                     date,
                     r#type: None,
-                    debits: Lines::Simple(debits),
-                    credits: Lines::Simple(credits),
-                    memo,
+                    debits: Some(Lines::Simple(debits)),
+                    credits: Some(Lines::Simple(credits)),
+                    memo: memo.expect("Journal entries should always have memo defined"),
                     ..Default::default()
                 })
             }

@@ -156,7 +156,7 @@ impl<'a> RenderStreamTable<'a> for Ledger<'a> {
                         };
                         future::ready(Some(colorized_row.to_string()))
                     }
-                    _ => future::ready(Some("ERROR".to_string())),
+                    Err(e) => future::ready(Some(format!("{e:?}"))),
                 },
                 TableRow::Footer => future::ready(None),
                 TableRow::InterBody => future::ready(None),
@@ -202,9 +202,6 @@ fn set_ledger_cols(t: &mut comfy_table::Table, width: Option<u16>) {
         .set_cell_alignment(CellAlignment::Right);
 }
 
-static JOURNAL_MEMO_STYLE: TableStyle =
-    TableStyle::new().content_lines(ContentLineStyle::new(' ', '│', ' '));
-
 impl<'a> RenderStreamTable<'a> for BoxStream<'a, Result<JournalEntry>> {
     fn render(self) -> BoxStream<'a, String> {
         self.render_with(Default::default())
@@ -247,6 +244,8 @@ impl<'a> RenderStreamTable<'a> for BoxStream<'a, Result<JournalEntry>> {
 
                         let initial = lines.next();
 
+                        let mut table_str = String::new();
+
                         if let Some(l) = initial {
                             lines_table.add_row([
                                 journal_entry.date().to_string(),
@@ -254,30 +253,33 @@ impl<'a> RenderStreamTable<'a> for BoxStream<'a, Result<JournalEntry>> {
                                 l.1.get_debit().map(|m| m.to_string()).unwrap_or_default(),
                                 l.1.get_credit().map(|m| m.to_string()).unwrap_or_default(),
                             ]);
-                        } else {
-                            lines_table.add_row([journal_entry.date().to_string(), "".to_string()]);
-                        }
 
-                        lines.for_each(|l| {
-                            lines_table.add_row([
-                                "".to_string(),
-                                l.0,
-                                l.1.get_debit().map(|m| m.to_string()).unwrap_or_default(),
-                                l.1.get_credit().map(|m| m.to_string()).unwrap_or_default(),
-                            ]);
-                        });
-                        set_journal_cols(&mut lines_table, width);
+                            lines.for_each(|l| {
+                                lines_table.add_row([
+                                    "".to_string(),
+                                    l.0,
+                                    l.1.get_debit().map(|m| m.to_string()).unwrap_or_default(),
+                                    l.1.get_credit().map(|m| m.to_string()).unwrap_or_default(),
+                                ]);
+                            });
+                            set_journal_cols(&mut lines_table, width);
 
-                        let mut table_str = lines_table.to_string();
+                            table_str = lines_table.to_string();
 
-                        if let Some(memo) = journal_entry.memo() {
                             let mut memo_table = Table::new();
                             memo_table
-                                .load_style(JOURNAL_MEMO_STYLE)
-                                .add_row(["", format!("({memo})").as_str()]);
+                                .load_style(TABLE_STYLE)
+                                .add_row(["", format!("({})", journal_entry.memo()).as_str()]);
                             set_journal_memo_cols(&mut memo_table, width);
                             table_str.push('\n');
                             table_str.push_str(memo_table.to_string().as_str());
+                        } else {
+                            lines_table.add_row([
+                                journal_entry.date().to_string(),
+                                format!("({})", journal_entry.memo()),
+                            ]);
+                            set_journal_memo_cols(&mut lines_table, width);
+                            table_str = lines_table.to_string();
                         }
 
                         if !no_colors {
@@ -295,7 +297,7 @@ impl<'a> RenderStreamTable<'a> for BoxStream<'a, Result<JournalEntry>> {
 
                         future::ready(Some(table_str))
                     }
-                    _ => future::ready(Some("ERROR".to_string())),
+                    Err(e) => future::ready(Some(format!("{e:?}"))),
                 },
                 TableRow::InterBody => future::ready(None),
                 TableRow::Footer => future::ready(None),

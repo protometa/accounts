@@ -62,9 +62,9 @@ pub struct JournalEntry {
     pub id: Option<String>, // if not specified will use filename TODO needs more work
     pub date: String,
     pub r#type: Option<JournalEntryType>,
-    pub memo: Option<String>,
-    pub debits: Lines,
-    pub credits: Lines,
+    pub memo: String,
+    pub debits: Option<Lines>,
+    pub credits: Option<Lines>,
 }
 
 /// Raw struct deserilized from yaml
@@ -139,7 +139,7 @@ impl Entry {
     }
     pub fn memo(&self) -> Option<String> {
         match self {
-            Self::JournalEntry(x) => x.memo.clone(),
+            Self::JournalEntry(x) => Some(x.memo.clone()),
             Self::PaymentEntry(x) => x.memo.clone(),
             Self::InvoiceEntry(x) => x.memo.clone(),
         }

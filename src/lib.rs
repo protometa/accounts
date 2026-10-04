@@ -88,7 +88,7 @@ fn ledger_from_journal(
                     if line.0 == account {
                         Some(Ok(LedgerLine {
                             date: entry.date(),
-                            memo: entry.memo(),
+                            memo: Some(entry.memo()),
                             amount: line.1,
                             running_total: JournalAmount::default(),
                         }))
@@ -436,6 +436,7 @@ mod entry_tests {
     const ENTRIES_STR: &str = indoc! {"
         ---
         date: 2020-01-02
+        memo: Opening
         credits:
           Owner Contributions: $100.00  
         debits:
