@@ -351,11 +351,11 @@ impl From<Entry> for raw::Entry {
             Body::Journal(lines) => {
                 let debits: HashMap<String, Money> = lines
                     .iter()
-                    .filter_map(|l| l.1.as_abs_debit().map(|m| (l.0.clone(), m)))
+                    .filter_map(|l| l.1.get_debit().map(|m| (l.0.clone(), m)))
                     .collect();
                 let credits: HashMap<String, Money> = lines
                     .iter()
-                    .filter_map(|l| l.1.as_abs_credit().map(|m| (l.0.clone(), m)))
+                    .filter_map(|l| l.1.get_credit().map(|m| (l.0.clone(), m)))
                     .collect();
 
                 // TODO check to see if this is a case where expanded lines should be used

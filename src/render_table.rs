@@ -1,7 +1,7 @@
 use crate::account::BalanceType::{self, Credit, Debit};
 use crate::entry::journal::{JournalAmount, JournalEntry};
 use crate::money::Money;
-use crate::{BalanceLine, LedgerLine};
+use crate::{BalanceLine, Ledger, LedgerLine};
 use anyhow::Result;
 use colored_text::Colorize;
 use comfy_table::*;
@@ -41,7 +41,6 @@ static HEADER_BG_COLOR: &str = "acc";
 
 #[derive(Default)]
 pub struct RenderTableOpts {
-    pub balance: Option<BalanceType>,
     pub width: Option<u16>,
     pub no_colors: bool,
     pub body_only: bool,
@@ -75,25 +74,30 @@ fn as_table_rows<'a, T: Send + 'a>(s: BoxStream<'a, T>) -> BoxStream<'a, TableRo
 }
 
 pub trait RenderStreamTable<'a> {
-    fn render(self, opts: RenderTableOpts) -> BoxStream<'a, String>;
+    fn render(self) -> BoxStream<'a, String>;
+    fn render_with(self, opts: RenderTableOpts) -> BoxStream<'a, String>;
 }
 
 pub trait RenderTable {
-    fn render(self, opts: RenderTableOpts) -> String;
+    fn render(self) -> String;
+    fn render_with(self, opts: RenderTableOpts) -> String;
 }
 
-impl<'a> RenderStreamTable<'a> for BoxStream<'a, Result<LedgerLine>> {
-    fn render(
+impl<'a> RenderStreamTable<'a> for Ledger<'a> {
+    fn render(self) -> BoxStream<'a, String> {
+        self.render_with(Default::default())
+    }
+
+    fn render_with(
         self,
         RenderTableOpts {
-            balance,
             width,
             no_colors,
             body_only,
             ..
         }: RenderTableOpts,
     ) -> BoxStream<'a, String> {
-        as_table_rows(self)
+        as_table_rows(self.0)
             .filter(move |row| {
                 future::ready(match row {
                     TableRow::Body(_, _) => true,
@@ -104,10 +108,9 @@ impl<'a> RenderStreamTable<'a> for BoxStream<'a, Result<LedgerLine>> {
                 // comfy_table is used to render tables, but since the data is incrimental and comfy_table structure is limited, a table often represents a single row
                 TableRow::Header => {
                     let mut t = Table::new();
-                    let drcr = match balance {
-                        Some(Debit) => "Dr",
-                        Some(Credit) => "Cr",
-                        None => "??",
+                    let drcr = match self.1 {
+                        Debit => "Dr",
+                        Credit => "Cr",
                     };
                     t.load_style(TABLE_STYLE).set_header([
                         "Date",
@@ -115,6 +118,7 @@ impl<'a> RenderStreamTable<'a> for BoxStream<'a, Result<LedgerLine>> {
                         "Debit",
                         "Credit",
                         format!("{drcr} Balance").as_str(),
+                        // "Balance",
                     ]);
                     set_ledger_cols(&mut t, width);
                     // entire string rows are colored at once since comfy_table can only color individual cell content
@@ -132,16 +136,14 @@ impl<'a> RenderStreamTable<'a> for BoxStream<'a, Result<LedgerLine>> {
                             line.date.to_string(),
                             line.memo.unwrap_or(String::default()),
                             line.amount
-                                .as_abs_debit()
+                                .get_debit()
                                 .map(|m| m.to_string())
                                 .unwrap_or_default(),
                             line.amount
-                                .as_abs_credit()
+                                .get_credit()
                                 .map(|m| m.to_string())
                                 .unwrap_or_default(),
-                            line.running_total
-                                .as_balance_type(balance.as_ref().unwrap_or(&Debit))
-                                .to_string(),
+                            line.running_total.as_balance_type(&self.1).to_string(),
                         ];
                         t.load_style(TABLE_STYLE).add_row(row);
                         set_ledger_cols(&mut t, width);
@@ -204,7 +206,11 @@ static JOURNAL_MEMO_STYLE: TableStyle =
     TableStyle::new().content_lines(ContentLineStyle::new(' ', '│', ' '));
 
 impl<'a> RenderStreamTable<'a> for BoxStream<'a, Result<JournalEntry>> {
-    fn render(
+    fn render(self) -> BoxStream<'a, String> {
+        self.render_with(Default::default())
+    }
+
+    fn render_with(
         self,
         RenderTableOpts {
             width,
@@ -245,12 +251,8 @@ impl<'a> RenderStreamTable<'a> for BoxStream<'a, Result<JournalEntry>> {
                             lines_table.add_row([
                                 journal_entry.date().to_string(),
                                 l.0,
-                                l.1.as_abs_debit()
-                                    .map(|m| m.to_string())
-                                    .unwrap_or_default(),
-                                l.1.as_abs_credit()
-                                    .map(|m| m.to_string())
-                                    .unwrap_or_default(),
+                                l.1.get_debit().map(|m| m.to_string()).unwrap_or_default(),
+                                l.1.get_credit().map(|m| m.to_string()).unwrap_or_default(),
                             ]);
                         } else {
                             lines_table.add_row([journal_entry.date().to_string(), "".to_string()]);
@@ -260,12 +262,8 @@ impl<'a> RenderStreamTable<'a> for BoxStream<'a, Result<JournalEntry>> {
                             lines_table.add_row([
                                 "".to_string(),
                                 l.0,
-                                l.1.as_abs_debit()
-                                    .map(|m| m.to_string())
-                                    .unwrap_or_default(),
-                                l.1.as_abs_credit()
-                                    .map(|m| m.to_string())
-                                    .unwrap_or_default(),
+                                l.1.get_debit().map(|m| m.to_string()).unwrap_or_default(),
+                                l.1.get_credit().map(|m| m.to_string()).unwrap_or_default(),
                             ]);
                         });
                         set_journal_cols(&mut lines_table, width);
@@ -356,7 +354,11 @@ fn set_journal_memo_cols(t: &mut comfy_table::Table, width: Option<u16>) {
 }
 
 impl RenderTable for Vec<BalanceLine> {
-    fn render(
+    fn render(self) -> String {
+        self.render_with(Default::default())
+    }
+
+    fn render_with(
         self,
         RenderTableOpts {
             width, no_colors, ..
@@ -365,8 +367,8 @@ impl RenderTable for Vec<BalanceLine> {
         let totals = self.iter().fold(
             (Money::default(), Money::default()),
             |(mut dr, mut cr), (_, amount)| {
-                dr += amount.as_abs_debit().unwrap_or_default();
-                cr += amount.as_abs_credit().unwrap_or_default();
+                dr += amount.get_debit().unwrap_or_default();
+                cr += amount.get_credit().unwrap_or_default();
                 (dr, cr)
             },
         );
@@ -389,11 +391,11 @@ impl RenderTable for Vec<BalanceLine> {
                 let row = [
                     account.to_owned(),
                     amount
-                        .as_abs_debit()
+                        .get_debit()
                         .map(|m| m.to_string())
                         .unwrap_or_default(),
                     amount
-                        .as_abs_credit()
+                        .get_credit()
                         .map(|m| m.to_string())
                         .unwrap_or_default(),
                 ];
@@ -428,12 +430,8 @@ impl RenderTable for Vec<BalanceLine> {
             net += JournalAmount::Credit(totals.1);
             let total_row = [
                 "NET",
-                &net.as_abs_debit()
-                    .map(|m| m.to_string())
-                    .unwrap_or_default(),
-                &net.as_abs_credit()
-                    .map(|m| m.to_string())
-                    .unwrap_or_default(),
+                &net.get_debit().map(|m| m.to_string()).unwrap_or_default(),
+                &net.get_credit().map(|m| m.to_string()).unwrap_or_default(),
             ];
             t.load_style(TABLE_STYLE).add_row(total_row);
             set_balance_cols(&mut t, width);

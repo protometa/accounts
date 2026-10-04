@@ -205,7 +205,7 @@ async fn main() -> Result<()> {
 
             instance
                 .journal_filtered(account, party)
-                .render(RenderTableOpts::default())
+                .render()
                 .for_each(|line| println!("{line}"))
                 .await;
         } else if let Some(ledger) = matches.subcommand_matches("ledger") {
@@ -215,18 +215,9 @@ async fn main() -> Result<()> {
                 .map(|b| b.parse::<BalanceType>())
                 .transpose()?;
 
-            let balance = balance
-                .or_else(|| instance.account(account).map(|a| a.normal_balance()))
-                .context(
-                    "Balance type not provided and cannot be determined from Chart of Accounts",
-                )?;
-
             instance
-                .ledger(account)
-                .render(RenderTableOpts {
-                    balance: Some(balance),
-                    ..Default::default()
-                })
+                .ledger(account, balance)?
+                .render()
                 .for_each(|line| println!("{line}"))
                 .await;
         } else if let Some(balances) = matches.subcommand_matches("balances") {
@@ -243,9 +234,7 @@ async fn main() -> Result<()> {
             let table = instance
                 .balances_filtered(account, party, is_real)
                 .await?
-                .render(RenderTableOpts {
-                    ..Default::default()
-                });
+                .render();
 
             println!("{table}");
         } else if let Some(report) = matches.subcommand_matches("report") {

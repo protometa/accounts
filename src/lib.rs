@@ -7,7 +7,7 @@ pub mod money;
 pub mod render_table;
 pub mod report;
 
-use account::Account;
+use account::{Account, BalanceType, BalanceType::*};
 use anyhow::{Context, Error, Result, bail};
 use chart_of_accounts::ChartOfAccounts;
 use chrono::NaiveDate;
@@ -78,7 +78,7 @@ pub fn entries_from_lines<'a>(
 fn ledger_from_journal(
     journal_entries: BoxStream<Result<JournalEntry>>,
     account: String,
-) -> BoxStream<Result<LedgerLine>> {
+) -> BoxStream<'_, Result<LedgerLine>> {
     journal_entries
         // flatten to ledger lines
         .map_ok(move |entry| {
@@ -90,7 +90,7 @@ fn ledger_from_journal(
                             date: entry.date(),
                             memo: entry.memo(),
                             amount: line.1,
-                            running_total: Default::default(),
+                            running_total: JournalAmount::default(),
                         }))
                     } else {
                         None
@@ -139,6 +139,7 @@ pub struct LedgerLine {
     pub running_total: JournalAmount,
 }
 
+type Ledger<'a> = (BoxStream<'a, Result<LedgerLine>>, BalanceType);
 type Balances = HashMap<JournalAccount, JournalAmount>;
 type BalanceLine = (JournalAccount, JournalAmount);
 
@@ -291,9 +292,13 @@ impl Accounts {
             .boxed()
     }
 
-    pub fn ledger(&self, account: &str) -> BoxStream<Result<LedgerLine>> {
+    pub fn ledger(&self, account: &str, balance: Option<BalanceType>) -> Result<Ledger> {
         let lines = self.journal_filtered(None, None);
-        ledger_from_journal(lines, account.to_string())
+        let balance = balance
+            .or_else(|| self.account(account).map(|a| a.normal_balance()))
+            .context("Balance type not provided and cannot be determined from Chart of Accounts")?;
+
+        Ok((ledger_from_journal(lines, account.to_string()), balance))
     }
 
     /// Get balances for each account appearing in own stream of `JournalEntry`s

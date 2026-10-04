@@ -29,10 +29,12 @@ impl JournalAmount {
     pub fn new() -> Self {
         Debit(Money::zero())
     }
-    pub fn debit(n: f64) -> anyhow::Result<Self> {
+
+    pub fn debit(n: impl TryInto<Money, Error = Error>) -> Result<Self> {
         Ok(Debit(n.try_into()?))
     }
-    pub fn credit(n: f64) -> anyhow::Result<Self> {
+
+    pub fn credit(n: impl TryInto<Money, Error = Error>) -> Result<Self> {
         Ok(Credit(n.try_into()?))
     }
 
@@ -55,13 +57,13 @@ impl JournalAmount {
         }
     }
 
-    pub fn as_abs_debit(&self) -> Option<Money> {
+    pub fn get_debit(&self) -> Option<Money> {
         match self {
             Debit(money) => Some(*money),
             Credit(_) => None,
         }
     }
-    pub fn as_abs_credit(&self) -> Option<Money> {
+    pub fn get_credit(&self) -> Option<Money> {
         match self {
             Debit(_) => None,
             Credit(money) => Some(*money),

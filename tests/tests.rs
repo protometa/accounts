@@ -73,7 +73,7 @@ async fn test_journal_from_entries() -> Result<()> {
 
     let journal = instance
         .journal()
-        .render(RenderTableOpts {
+        .render_with(RenderTableOpts {
             width: Some(80),
             no_colors: true,
             ..Default::default()
@@ -127,7 +127,7 @@ async fn journal_entry() -> Result<()> {
 
     let journal = instance
         .journal()
-        .render(RenderTableOpts {
+        .render_with(RenderTableOpts {
             width: Some(80),
             no_colors: true,
             body_only: true,
@@ -156,9 +156,8 @@ async fn test_ledger() -> Result<()> {
     )
     .await?;
     let ledger = instance
-        .ledger("Business Checking")
-        .render(RenderTableOpts {
-            balance: Some(Debit),
+        .ledger("Business Checking", Some(Debit))?
+        .render_with(RenderTableOpts {
             width: Some(80),
             no_colors: true,
             ..Default::default()
@@ -177,6 +176,9 @@ async fn test_ledger() -> Result<()> {
     Ok(())
 }
 
+// TODO check inverted balance type in ledger
+// TODO check balance type from chart of accounts
+
 /// Test balances from entries
 #[async_std::test]
 async fn test_balance() -> Result<()> {
@@ -186,7 +188,7 @@ async fn test_balance() -> Result<()> {
         None,
     )
     .await?;
-    let balances = instance.balances().await?.render(RenderTableOpts {
+    let balances = instance.balances().await?.render_with(RenderTableOpts {
         width: Some(80),
         no_colors: true,
         ..Default::default()
@@ -218,7 +220,7 @@ async fn test_balance_with_chart() -> Result<()> {
         )),
     )
     .await?;
-    let balances = instance.balances().await?.render(RenderTableOpts {
+    let balances = instance.balances().await?.render_with(RenderTableOpts {
         width: Some(80),
         no_colors: true,
         ..Default::default()
@@ -254,7 +256,7 @@ async fn test_balance_real() -> Result<()> {
         // passing is_real true
         .balances_filtered(None, None, Some(true))
         .await?
-        .render(RenderTableOpts {
+        .render_with(RenderTableOpts {
             width: Some(80),
             no_colors: true,
             ..Default::default()
@@ -289,7 +291,7 @@ async fn test_balance_nominal() -> Result<()> {
         // passing is_real false
         .balances_filtered(None, None, Some(false))
         .await?
-        .render(RenderTableOpts {
+        .render_with(RenderTableOpts {
             width: Some(80),
             no_colors: true,
             ..Default::default()
@@ -356,9 +358,8 @@ async fn ordered_recurring() -> Result<()> {
     )
     .await?;
     let ledger = instance
-        .ledger("Accounts Payable")
-        .render(RenderTableOpts {
-            balance: Some(Credit),
+        .ledger("Accounts Payable", Some(Credit))?
+        .render_with(RenderTableOpts {
             width: Some(80),
             no_colors: true,
             ..Default::default()
