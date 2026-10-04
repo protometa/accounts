@@ -9,6 +9,7 @@ use lines_ext::LinesExt;
 
 pub type AccountId = usize;
 
+// TODO consider making hashmap as lookup by name is common, ordering can be done by field on Account
 #[derive(Debug, Clone)]
 pub struct ChartOfAccounts(Vec<Account>);
 
@@ -42,33 +43,22 @@ impl ChartOfAccounts {
             .and_then(|doc| future::ready(doc.parse()))
             .try_collect()
             .await?;
-        // sort
+        // sort by class then account num if present then by position in file
         // TODO throw error if account names or nums not unique
         accounts = accounts
             .into_iter()
             .enumerate()
-            .map(|(i, mut account)| {
-                account.index = Some(i);
-                account
-            })
-            .sorted_by_key(|account| {
-                (
-                    account.class,
-                    account.num.unwrap_or(usize::MAX),
-                    account.index,
-                )
-            })
-            // re-index based on overall sort
-            .enumerate()
-            .map(|(i, mut account)| {
-                account.index = Some(i);
-                account
-            })
+            .sorted_by_key(|(i, account)| (account.class, account.num.unwrap_or(usize::MAX), *i))
+            .map(|(_, a)| a)
             .collect();
         Ok(ChartOfAccounts(accounts))
     }
 
     pub fn get(&self, name: &str) -> Option<&Account> {
         self.0.iter().find(|account| account.name == name)
+    }
+
+    pub fn position(&self, name: &str) -> Option<usize> {
+        self.0.iter().position(|account| account.name == name)
     }
 }

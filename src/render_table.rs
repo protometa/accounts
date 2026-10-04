@@ -1,8 +1,7 @@
-
 use crate::account::BalanceType::{self, Credit, Debit};
 use crate::entry::journal::{JournalAmount, JournalEntry};
 use crate::money::Money;
-use crate::{Balances, LedgerLine};
+use crate::{BalanceLine, LedgerLine};
 use anyhow::Result;
 use colored_text::Colorize;
 use comfy_table::*;
@@ -356,7 +355,7 @@ fn set_journal_memo_cols(t: &mut comfy_table::Table, width: Option<u16>) {
         .set_constraint(ColumnConstraint::Absolute(Width::Fixed(memo_col_dyn_width)));
 }
 
-impl RenderTable for Balances {
+impl RenderTable for Vec<BalanceLine> {
     fn render(
         self,
         RenderTableOpts {
@@ -365,7 +364,7 @@ impl RenderTable for Balances {
     ) -> String {
         let totals = self.iter().fold(
             (Money::default(), Money::default()),
-            |(mut dr, mut cr), (_, (amount, _))| {
+            |(mut dr, mut cr), (_, amount)| {
                 dr += amount.as_abs_debit().unwrap_or_default();
                 cr += amount.as_abs_credit().unwrap_or_default();
                 (dr, cr)
@@ -385,16 +384,8 @@ impl RenderTable for Balances {
 
         let row_strings = self
             .iter()
-            // sort by index from chart (last if not found), or by name
-            .sorted_by_key(|a| {
-                (
-                    a.1.1.clone().and_then(|a| a.index).unwrap_or(usize::MAX),
-                    a.0,
-                )
-                // TODO maybe warn on not found account
-            })
             .enumerate()
-            .map(|(i, (account, (amount, _)))| {
+            .map(|(i, (account, amount))| {
                 let row = [
                     account.to_owned(),
                     amount

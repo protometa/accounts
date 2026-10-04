@@ -262,14 +262,14 @@ async fn main() -> Result<()> {
             let payables = instance.payable().await?;
             let mut payables: Vec<_> = payables.iter().collect();
             payables.sort_by_key(|x| x.0);
-            payables.iter().for_each(|(account, (amount, _))| {
+            payables.iter().for_each(|(account, amount)| {
                 println!("{:32} | {}", account, amount.to_row_string(12));
             });
         } else if matches.subcommand_matches("receivable").is_some() {
             let receivables = instance.receivable().await?;
             let mut receivables: Vec<_> = receivables.iter().collect();
             receivables.sort_by_key(|x| x.0);
-            receivables.iter().for_each(|(account, (amount, _))| {
+            receivables.iter().for_each(|(account, amount)| {
                 println!("{:32} | {}", account, amount.to_row_string(12));
             });
         } else if let Some(reconcile) = matches.subcommand_matches("reconcile") {

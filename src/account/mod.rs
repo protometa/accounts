@@ -77,7 +77,6 @@ pub struct Account {
     pub name: String,
     pub tags: Vec<Tag>,
     pub num: Option<usize>, // unique identifier, used for ordering if present
-    pub index: Option<usize>, // position in chart of accounts, used for ordering along with class if num is not specified
 }
 
 impl Account {
@@ -87,7 +86,6 @@ impl Account {
             class,
             tags,
             num,
-            index: None,
         }
     }
 
@@ -135,7 +133,6 @@ impl TryFrom<raw::Account> for Account {
             name: raw_account.name,
             tags,
             num: raw_account.num,
-            index: None,
         })
     }
 }
