@@ -328,7 +328,9 @@ impl TryFrom<raw::Entry> for Entry {
                                 }))
                             }
                             Some(Lines::Expanded(expanded)) => Box::new(expanded.into_iter().map(
-                                |ExpandedLine { account, amount }| {
+                                |ExpandedLine {
+                                     account, amount, ..
+                                 }| {
                                     Ok(JournalLine(account.to_owned(), Debit(amount)))
                                 },
                             )),
@@ -342,7 +344,9 @@ impl TryFrom<raw::Entry> for Entry {
                                 }))
                             }
                             Some(Lines::Expanded(expanded)) => Box::new(expanded.into_iter().map(
-                                |ExpandedLine { account, amount }| {
+                                |ExpandedLine {
+                                     account, amount, ..
+                                 }| {
                                     Ok(JournalLine(account.to_owned(), Credit(amount)))
                                 },
                             )),

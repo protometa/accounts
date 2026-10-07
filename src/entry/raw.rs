@@ -5,7 +5,7 @@ use serde_with::skip_serializing_none;
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Serialize, Default, JsonSchema)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum Lines {
     #[default]
     Empty,
@@ -14,9 +14,11 @@ pub enum Lines {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ExpandedLine {
     pub account: String,
     pub amount: Money,
+    pub memo: Option<String>, // TODO not yet used anywhere
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq, Clone, Serialize, JsonSchema)]
@@ -46,8 +48,7 @@ pub enum PaymentEntryType {
 
 /// Raw struct deserilized from yaml
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum Entry {
     JournalEntry(JournalEntry),
     PaymentEntry(PaymentEntry),
@@ -186,6 +187,7 @@ impl Items {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Item {
     pub description: Option<String>,
     pub code: Option<String>,    // include if tracking
@@ -196,6 +198,7 @@ pub struct Item {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Extra {
     pub description: Option<String>,
     pub account: String,
@@ -204,6 +207,7 @@ pub struct Extra {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Payment {
     pub account: String,
     pub amount: Money,
